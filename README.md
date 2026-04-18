@@ -143,4 +143,4 @@ ddi_system/
 
 ## 许可证
 
-MIT License
+Apache License 2.0
