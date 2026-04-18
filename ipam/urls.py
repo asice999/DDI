@@ -1,3 +1,5 @@
+"""IPAM模块 - URL路由配置（含网络探测功能路由）"""
+
 from django.urls import path
 from .views import (
     RegionListView, RegionCreateView, RegionUpdateView, RegionDeleteView,

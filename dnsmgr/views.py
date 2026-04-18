@@ -1,3 +1,8 @@
+"""
+DNS管理模块 - 视图函数
+提供区域/记录CRUD、DNS服务管理、解析测试、服务探测、探测任务管理等功能
+"""
+
 from django.shortcuts import render, redirect, get_object_or_404
 from django.views.generic import CreateView, UpdateView, DeleteView, ListView, DetailView
 from django.contrib.auth.decorators import login_required
@@ -17,6 +22,7 @@ from common.logger import log_operation
 # ========== DNS区域管理 ==========
 @method_decorator([login_required], name='dispatch')
 class ZoneListView(ListView):
+    """DNS区域列表视图 - 展示所有正向和反向区域"""
     model = DNSZone
     template_name = 'dnsmgr/zone_list.html'
     context_object_name = 'zones'
@@ -24,6 +30,7 @@ class ZoneListView(ListView):
 
 @method_decorator([login_required], name='dispatch')
 class ZoneDetailView(DetailView):
+    """区域详情视图 - 展示区域下的记录列表，支持筛选、搜索和探测状态展示"""
     model = DNSZone
     template_name = 'dnsmgr/zone_detail.html'
     context_object_name = 'zone'
@@ -104,12 +111,14 @@ class ZoneDetailView(DetailView):
 
 @method_decorator([login_required], name='dispatch')
 class ZoneCreateView(CreateView):
+    """创建DNS区域视图 - 支持正向区域和反向区域"""
     model = DNSZone
     form_class = DNSZoneForm
     template_name = 'dnsmgr/zone_form.html'
     success_url = reverse_lazy('dnsmgr:zone_list')
     
     def form_valid(self, form):
+        """创建成功后记录操作日志"""
         messages.success(self.request, f'DNS区域 {form.instance.name} 创建成功')
         log_operation(self.request.user, '新增', 'dns', 'zone', '', form.instance.name)
         return super().form_valid(form)
@@ -117,6 +126,7 @@ class ZoneCreateView(CreateView):
 
 @method_decorator([login_required], name='dispatch')
 class ZoneUpdateView(UpdateView):
+    """编辑DNS区域视图"""
     model = DNSZone
     form_class = DNSZoneForm
     template_name = 'dnsmgr/zone_form.html'
@@ -125,6 +135,7 @@ class ZoneUpdateView(UpdateView):
 
 @method_decorator([login_required], name='dispatch')
 class ZoneDeleteView(DeleteView):
+    """删除DNS区域视图 - 会级联删除该区域下所有记录"""
     model = DNSZone
     template_name = 'dnsmgr/confirm_delete.html'
     success_url = reverse_lazy('dnsmgr:zone_list')
@@ -133,12 +144,14 @@ class ZoneDeleteView(DeleteView):
 # ========== DNS记录管理 ==========
 @method_decorator([login_required], name='dispatch')
 class RecordListView(ListView):
+    """DNS记录列表视图 - 全局记录列表，支持按名称/值搜索，按类型/区域/状态筛选"""
     model = DNSRecord
     template_name = 'dnsmgr/record_list.html'
     context_object_name = 'records'
     paginate_by = 25
     
     def get_queryset(self):
+        """预加载区域关联数据，支持多条件组合筛选"""
         queryset = super().get_queryset().select_related('zone')
         
         form = DNSRecordSearchForm(self.request.GET)
@@ -163,14 +176,17 @@ class RecordListView(ListView):
 
 @method_decorator([login_required], name='dispatch')
 class RecordCreateView(CreateView):
+    """创建DNS记录视图 - 支持自动探测服务可达性，根据探测结果自动标记记录状态"""
     model = DNSRecord
     form_class = DNSRecordForm
     template_name = 'dnsmgr/record_form.html'
 
     def get_success_url(self):
+        """创建成功后跳转到所属区域详情页"""
         return reverse('dnsmgr:zone_detail', kwargs={'pk': self.object.zone.pk})
     
     def get_initial(self):
+        """从URL参数中获取预选区域ID，支持从区域详情页直接新增记录"""
         initial = super().get_initial()
         zone_id = self.request.GET.get('zone')
         if zone_id:
@@ -178,6 +194,7 @@ class RecordCreateView(CreateView):
         return initial
 
     def get_context_data(self, **kwargs):
+        """传递探测任务列表到模板，用于记录关联探测"""
         ctx = super().get_context_data(**kwargs)
         ctx['probe_tasks'] = ProbeTask.objects.filter(
             created_by=self.request.user
@@ -185,6 +202,7 @@ class RecordCreateView(CreateView):
         return ctx
 
     def form_valid(self, form):
+        """表单验证通过后，如设置了探测端口则自动探测目标可达性，根据结果标记记录状态"""
         # 先保存记录
         response = super().form_valid(form)
         record = self.object
@@ -201,6 +219,7 @@ class RecordCreateView(CreateView):
                                      f"{target_ip}:{probe_port} -> {probe_result['status']}")
 
                         if probe_result['status'] == 'reachable':
+                            # 探测可达：记录保持enabled状态
                             if record.status != 'disabled':
                                 record.status = 'enabled'
                                 record.save()
@@ -212,6 +231,7 @@ class RecordCreateView(CreateView):
                                     f'DNS记录 {record.name} 创建成功！服务探测 <span class="text-success">可达</span> '
                                     f'({target_ip}:{probe_port} 延迟{probe_result["latency_ms"]}ms)')
                         else:
+                            # 探测不可达：自动标记为invalid
                             record.status = 'invalid'
                             record.save()
                             messages.warning(self.request,
@@ -241,14 +261,17 @@ class RecordCreateView(CreateView):
 
 @method_decorator([login_required], name='dispatch')
 class RecordUpdateView(UpdateView):
+    """编辑DNS记录视图"""
     model = DNSRecord
     form_class = DNSRecordForm
     template_name = 'dnsmgr/record_form.html'
 
     def get_success_url(self):
+        """编辑成功后跳转到所属区域详情页"""
         return reverse('dnsmgr:zone_detail', kwargs={'pk': self.object.zone.pk})
 
     def get_context_data(self, **kwargs):
+        """传递探测任务列表到模板"""
         ctx = super().get_context_data(**kwargs)
         ctx['probe_tasks'] = ProbeTask.objects.filter(
             created_by=self.request.user
@@ -256,6 +279,7 @@ class RecordUpdateView(UpdateView):
         return ctx
 
     def form_valid(self, form):
+        """更新成功后记录操作日志"""
         response = super().form_valid(form)
         messages.success(self.request, f'DNS记录 {self.object.name} 已更新')
         log_operation(self.request.user, '修改', 'dns', 'record', '', str(self.object))
@@ -264,6 +288,7 @@ class RecordUpdateView(UpdateView):
 
 @method_decorator([login_required], name='dispatch')
 class RecordDeleteView(DeleteView):
+    """删除DNS记录视图"""
     model = DNSRecord
     template_name = 'dnsmgr/confirm_delete.html'
     success_url = reverse_lazy('dnsmgr:record_list')
@@ -271,7 +296,7 @@ class RecordDeleteView(DeleteView):
 
 @login_required
 def toggle_record_status(request, pk):
-    """启用/禁用DNS记录"""
+    """启用/禁用DNS记录 - 切换记录的启用/禁用状态"""
     record = get_object_or_404(DNSRecord, pk=pk)
     old_status = record.get_status_display()
     
@@ -290,7 +315,7 @@ def toggle_record_status(request, pk):
 # ========== DNS服务管理 ==========
 @login_required
 def dns_service(request):
-    """DNS服务管理页面 - 配置、启动、停止"""
+    """DNS服务管理页面 - 配置编辑、服务启停"""
     from .dns_server import get_dns_server
 
     dns_server = get_dns_server()
@@ -326,6 +351,7 @@ def dns_service(request):
 
         return redirect('dnsmgr:dns_service')
 
+    # GET请求：渲染服务管理页面
     context = {
         'server': dns_server,
         'status': dns_server.get_status(),
@@ -343,11 +369,10 @@ def dns_service(request):
 
     return render(request, 'dnsmgr/service.html', context)
 
-
 # ========== DNS解析日志查询 ==========
 @login_required
 def query_log(request):
-    """DNS解析记录查询 - 最多显示10000条"""
+    """DNS解析日志查询 - 最多展示10000条，支持按域名/类型/来源筛选"""
     queryset = DNSQueryLog.objects.all()
     
     # 搜索表单
@@ -358,6 +383,7 @@ def query_log(request):
         result_source = search_form.cleaned_data.get('result_source', '')
         
         if search:
+            # 同时在域名和客户端IP中搜索
             queryset = queryset.filter(
                 models.Q(query_name__icontains=search) | 
                 models.Q(client_ip__icontains=search)
@@ -371,14 +397,14 @@ def query_log(request):
     total_count = queryset.count()
     
     from django.core.paginator import Paginator
-    paginator = Paginator(queryset[:10000], per_page=50)  # 硬截断10000条
+    paginator = Paginator(queryset[:10000], per_page=50)  # 硬截断10000条，防止查询过慢
     page_number = request.GET.get('page', 1)
     try:
         page_obj = paginator.page(page_number)
     except Exception:
         page_obj = paginator.page(1)
     
-    # 统计数据
+    # 统计数据 - 各来源类型的记录数
     stats_list = []
     total_logs = DNSQueryLog.objects.count()
     for src, label in DNSQueryLog.SOURCE_CHOICES:
@@ -430,7 +456,7 @@ def clear_query_log(request):
 # ========== DNS解析测试 ==========
 @login_required
 def dns_resolve_test(request):
-    """智能DNS解析测试 - 测试记录是否能正确解析"""
+    """智能DNS解析测试 - 测试记录在本地DNS和系统DNS上的解析结果对比"""
     if request.method != 'GET':
         return JsonResponse({'error': '仅支持GET请求'}, status=405)
 
@@ -465,7 +491,7 @@ def dns_resolve_test(request):
         'effective_reason': '',
     }
 
-    qtype_map = {'A': 1, 'AAAA': 28, 'CNAME': 5, 'MX': 15, 'TXT': 16, 'NS': 2, 'PTR': 12}
+    qtype_map = {'A': 1, 'AAAA': 28, 'CNAME': 5, 'MX': 15, 'TXT': 16, 'NS': 2, 'PTR': 12}  # DNS查询类型编码映射
     qtype_code = qtype_map.get(record_type, 1)
 
     # === 测试1: 通过本地DNS服务解析 ===
@@ -488,7 +514,7 @@ def dns_resolve_test(request):
     sys_result['source'] = '系统DNS'
     result['test_results'].append(sys_result)
 
-    # 综合判断生效状态
+    # 综合判断生效状态 - 本地不可达时参考系统DNS结果
     if not result['effective']:
         if sys_result['rcode'] == 0 and sys_result['answers']:
             # 系统DNS能解析但本地不行，说明本地没有这条记录或者没启用
@@ -503,7 +529,7 @@ def dns_resolve_test(request):
 
 
 def _resolve_via_dns(domain, qtype_code, dns_server_ip='127.0.0.1', timeout=3):
-    """通过指定DNS服务器执行DNS解析"""
+    """通过指定DNS服务器执行DNS解析 - 构造原始DNS查询包并发送UDP请求"""
     result = {
         'rcode': -1,
         'rcname': 'ERROR',
@@ -637,7 +663,7 @@ def _resolve_via_system_dns(domain, record_type='A'):
 
 
 def _extract_answers_from_response(resp_bytes, ancount, expected_qtype):
-    """从DNS响应中提取答案"""
+    """从DNS响应包中提取答案部分，解析A/AAAA/CNAME/MX/TXT/NS/PTR记录"""
     import struct
 
     answers = []
@@ -707,7 +733,7 @@ def _extract_answers_from_response(resp_bytes, ancount, expected_qtype):
 
 
 def _decode_name_from_rdata(data):
-    """从rdata中解码域名"""
+    """从rdata中解码域名（支持指针压缩）"""
     labels = []
     pos = 0
     while pos < len(data):
@@ -735,7 +761,7 @@ def service_probe_index(request):
 
 @login_required
 def service_probe(request):
-    """探测IP主机的端口可达性 - 支持AJAX调用"""
+    """探测IP主机的端口可达性 - 支持单目标和批量探测(AJAX)"""
     if request.method != 'GET':
         return JsonResponse({'error': '仅支持GET请求'}, status=405)
 
@@ -747,7 +773,7 @@ def service_probe(request):
     targets_raw = request.GET.get('targets', '').strip()
 
     if targets_raw:
-        # 解析多目标
+        # 解析多目标（支持逗号分隔或换行分隔）
         targets = [t.strip() for t in targets_raw.replace(',', '\n').split('\n') if t.strip()]
         port = int(port_str) if port_str.isdigit() else 53
         results = [_probe_single(t, port, timeout) for t in targets]
@@ -771,7 +797,7 @@ def service_probe(request):
 
 
 def _probe_single(ip, port, timeout=3):
-    """探测单个 IP:Port 的可达性"""
+    """探测单个 IP:Port 的TCP可达性，返回状态和延迟"""
     start_time = time.time()
     result = {
         'ip': ip,
@@ -841,7 +867,7 @@ def probe_task_list(request):
 
 @login_required
 def probe_task_create(request):
-    """创建新探测任务"""
+    """创建新探测任务 - 设置目标地址、端口、探测间隔"""
     if request.method != 'POST':
         return JsonResponse({'error': '仅支持POST'}, status=405)
 
@@ -877,7 +903,7 @@ def probe_task_create(request):
 
 @login_required
 def probe_task_update(request, pk):
-    """更新任务状态（暂停/恢复/停止）或保存探测结果或编辑任务"""
+    """更新任务状态（暂停/恢复/停止）、编辑任务属性或保存探测结果"""
     task = get_object_or_404(ProbeTask, pk=pk, created_by=request.user)
 
     if request.method == 'PUT':
@@ -965,7 +991,7 @@ def probe_task_update(request, pk):
         except (json.JSONDecodeError, TypeError):
             return JsonResponse({'error': '无效JSON'}, status=400)
 
-        # 更新统计
+        # 更新统计 - 根据探测结果累加对应计数器
         task.total_probes += 1
         status = result_data.get('status', '')
         if status == 'reachable':
@@ -974,20 +1000,20 @@ def probe_task_update(request, pk):
             task.timeout_count += 1
         else:
             task.error_count += 1
-
-        # 更新最近结果
+        
+        # 更新最近结果 - 记录最新一次探测的状态、延迟和消息
         task.last_status = status
         task.last_latency = result_data.get('latency_ms')
         task.last_message = result_data.get('message', '')[:200]
 
-        # 追加历史
+        # 追加历史 - 环形缓冲区，最多保留30条
         hlist = task.get_history_list()
         hlist.append({
             'status': status,
             'latency': result_data.get('latency_ms'),
             'message': result_data.get('message', ''),
         })
-        task.set_history(hlist)
+        task.set_history(hlist)  # set_history内部自动裁剪到30条
         task.save()
         return JsonResponse({'status': 'ok'})
 
@@ -996,7 +1022,7 @@ def probe_task_update(request, pk):
 
 @login_required
 def probe_task_delete(request, pk):
-    """删除探测任务（备用路由）"""
+    """删除探测任务 - 如果有DNS记录关联则拒绝删除"""
     if request.method not in ('DELETE', 'POST'):
         return JsonResponse({'error': '仅支持DELETE/POST'}, status=405)
     task = get_object_or_404(ProbeTask, pk=pk, created_by=request.user)

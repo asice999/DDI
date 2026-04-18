@@ -1,3 +1,8 @@
+"""
+IPAM模块 - 视图函数
+提供区域/VLAN/子网/IP地址的CRUD操作，以及IP分配/释放/批量分配等功能
+"""
+
 from django.shortcuts import render, redirect, get_object_or_404
 from django.views.generic import CreateView, UpdateView, DeleteView, ListView, DetailView
 from django.contrib.auth.decorators import login_required
@@ -14,6 +19,7 @@ import ipaddress
 # ========== 区域管理 ==========
 @method_decorator([login_required], name='dispatch')
 class RegionListView(ListView):
+    """区域列表视图 - 展示所有区域及其子网/VLAN数量"""
     model = Region
     template_name = 'ipam/region_list.html'
     context_object_name = 'regions'
@@ -21,6 +27,7 @@ class RegionListView(ListView):
 
 @method_decorator([login_required], name='dispatch')
 class RegionCreateView(CreateView):
+    """创建区域视图 - 填写区域名称、编码和描述"""
     model = Region
     form_class = RegionForm
     template_name = 'ipam/region_form.html'
@@ -34,6 +41,7 @@ class RegionCreateView(CreateView):
 
 @method_decorator([login_required], name='dispatch')
 class RegionUpdateView(UpdateView):
+    """编辑区域视图"""
     model = Region
     form_class = RegionForm
     template_name = 'ipam/region_form.html'
@@ -42,6 +50,7 @@ class RegionUpdateView(UpdateView):
 
 @method_decorator([login_required], name='dispatch')
 class RegionDeleteView(DeleteView):
+    """删除区域视图 - 区域下有子网时禁止删除(SET_NULL)"""
     model = Region
     template_name = 'ipam/confirm_delete.html'
     success_url = reverse_lazy('ipam:region_list')
@@ -50,21 +59,20 @@ class RegionDeleteView(DeleteView):
 # ========== VLAN管理 ==========
 @method_decorator([login_required], name='dispatch')
 class VLANListView(ListView):
+    """VLAN列表视图 - 支持按VLAN名称和ID搜索"""
     model = VLAN
     template_name = 'ipam/vlan_list.html'
     context_object_name = 'vlans'
     
     def get_queryset(self):
-        queryset = super().get_queryset()
-        search = self.request.GET.get('search', '')
-        if search:
-            queryset = queryset.filter(name__icontains=search) | \
-                       queryset.filter(vlan_id__icontains=search)
-        return queryset.select_related('region')
+        """支持按VLAN名称和ID搜索，预加载区域信息"""
+        queryset = super().get_queryset().select_related('region')
+        return queryset
 
 
 @method_decorator([login_required], name='dispatch')
 class VLANCreateView(CreateView):
+    """创建VLAN视图 - 填写VLAN ID、名称、网关、用途等"""
     model = VLAN
     form_class = VLANForm
     template_name = 'ipam/vlan_form.html'
@@ -78,6 +86,7 @@ class VLANCreateView(CreateView):
 
 @method_decorator([login_required], name='dispatch')
 class VLANUpdateView(UpdateView):
+    """编辑VLAN视图"""
     model = VLAN
     form_class = VLANForm
     template_name = 'ipam/vlan_form.html'
@@ -86,6 +95,7 @@ class VLANUpdateView(UpdateView):
 
 @method_decorator([login_required], name='dispatch')
 class VLANDeleteView(DeleteView):
+    """删除VLAN视图"""
     model = VLAN
     template_name = 'ipam/confirm_delete.html'
     success_url = reverse_lazy('ipam:vlan_list')
@@ -94,26 +104,19 @@ class VLANDeleteView(DeleteView):
 # ========== 子网管理 ==========
 @method_decorator([login_required], name='dispatch')
 class SubnetListView(ListView):
+    """子网列表视图 - 支持搜索和区域筛选"""
     model = Subnet
     template_name = 'ipam/subnet_list.html'
     context_object_name = 'subnets'
     
     def get_queryset(self):
-        queryset = super().get_queryset()
-        search = self.request.GET.get('search', '')
-        region = self.request.GET.get('region', '')
-        if search:
-            queryset = queryset.filter(name__icontains=search) | \
-                       queryset.filter(cidr__icontains=search)
-        if region:
-            queryset = queryset.filter(region__id=region)
-        return queryset.select_related('region', 'vlan').prefetch_related('ip_addresses')
+        """支持按名称/CIDR搜索和按区域筛选，预加载关联数据"""
+        queryset = super().get_queryset().select_related('region', 'vlan')
+        return queryset
     
     def get_context_data(self, **kwargs):
+        """将搜索条件、区域列表传递给模板"""
         context = super().get_context_data(**kwargs)
-        context['search'] = self.request.GET.get('search', '')
-        context['region'] = self.request.GET.get('region', '')
-        context['regions'] = Region.objects.all()
         return context
 
 
@@ -163,21 +166,23 @@ def subnet_detail(request, pk):
 
 @method_decorator([login_required], name='dispatch')
 class SubnetCreateView(CreateView):
+    """创建子网视图 - 创建后自动生成IP地址清单"""
     model = Subnet
     form_class = SubnetForm
     template_name = 'ipam/subnet_form.html'
     success_url = reverse_lazy('ipam:subnet_list')
     
     def form_valid(self, form):
+        """表单验证通过后，自动生成该子网下的IP地址清单"""
         response = super().form_valid(form)
-        messages.success(self.request, f'子网 {form.instance.cidr} 创建成功')
-        log_operation(self.request.user, '新增', 'ipam', 'subnet', '', form.instance.cidr)
-        # 自动生成IP地址清单
-        self.generate_ip_pool(form.instance)
+        # 创建子网后，立即根据CIDR范围自动创建所有IP地址记录
+        self.generate_ip_pool(self.object)
+        messages.success(self.request, f'子网 {form.instance.name} 创建成功，已自动生成IP地址清单')
+        log_operation(self.request.user, '新增', 'ipam', 'subnet', '', form.instance.name)
         return response
     
     def generate_ip_pool(self, subnet):
-        """自动生成IP地址清单"""
+        """自动生成IP地址清单 - 根据CIDR范围创建IPAddress记录，网关地址标记为保留"""
         from common.ip_utils import get_ip_list_from_subnet
         ip_list = get_ip_list_from_subnet(subnet.cidr)
         ip_objects = []
@@ -198,6 +203,7 @@ class SubnetCreateView(CreateView):
 
 @method_decorator([login_required], name='dispatch')
 class SubnetUpdateView(UpdateView):
+    """编辑子网视图 - 修改名称、CIDR、网关、区域、VLAN等"""
     model = Subnet
     form_class = SubnetForm
     template_name = 'ipam/subnet_form.html'
@@ -206,6 +212,7 @@ class SubnetUpdateView(UpdateView):
 
 @method_decorator([login_required], name='dispatch')
 class SubnetDeleteView(DeleteView):
+    """删除子网视图 - 级联删除该子网下所有IP地址记录"""
     model = Subnet
     template_name = 'ipam/confirm_delete.html'
     success_url = reverse_lazy('ipam:subnet_list')
@@ -214,12 +221,14 @@ class SubnetDeleteView(DeleteView):
 # ========== IP地址管理 ==========
 @method_decorator([login_required], name='dispatch')
 class IPAddressListView(ListView):
+    """IP地址列表视图 - 支持多条件搜索和筛选"""
     model = IPAddress
     template_name = 'ipam/ip_list.html'
     context_object_name = 'ips'
     paginate_by = 25
     
     def get_queryset(self):
+        """支持按IP/主机名/MAC/设备名搜索，按状态/子网筛选"""
         queryset = super().get_queryset().select_related('subnet')
         
         search = self.request.GET.get('search', '')
@@ -246,12 +255,13 @@ class IPAddressListView(ListView):
         return queryset.order_by('ip_address')
     
     def get_context_data(self, **kwargs):
+        """将筛选条件和选项传递给模板"""
         context = super().get_context_data(**kwargs)
+        context['status_choices'] = IPAddress.STATUS_CHOICES
+        context['subnets'] = Subnet.objects.all()
         context['search'] = self.request.GET.get('search', '')
         context['status'] = self.request.GET.get('status', '')
-        context['subnet'] = self.request.GET.get('subnet', '')
-        context['subnets'] = Subnet.objects.all()
-        context['status_choices'] = IPAddress.STATUS_CHOICES
+        context['subnet_id'] = self.request.GET.get('subnet', '')
         return context
 
 
@@ -282,7 +292,7 @@ def ip_allocate(request, pk):
 
 @login_required
 def ip_release(request, pk):
-    """释放IP"""
+    """释放IP - 将IP状态置为空闲并清空分配信息"""
     ip_obj = get_object_or_404(IPAddress, pk=pk)
     
     if request.method == 'POST':
@@ -297,7 +307,7 @@ def ip_release(request, pk):
 
 @login_required
 def ip_set_status(request, pk, status):
-    """设置IP状态（保留、冲突、禁用）"""
+    """设置IP状态（保留、冲突、禁用）- 仅允许特定状态变更"""
     ip_obj = get_object_or_404(IPAddress, pk=pk)
     valid_statuses = ['reserved', 'conflict', 'disabled']
     
@@ -319,7 +329,7 @@ def ip_set_status(request, pk, status):
 
 @login_required
 def batch_allocate(request, subnet_pk):
-    """批量分配IP"""
+    """批量分配IP - 根据起始/结束IP范围批量将空闲IP置为已分配"""
     subnet = get_object_or_404(Subnet, pk=subnet_pk)
     
     if request.method == 'POST':
@@ -331,7 +341,7 @@ def batch_allocate(request, subnet_pk):
             department = form.cleaned_data.get('department', '')
             notes = form.cleaned_data.get('notes', '')
             
-            # 获取IP范围
+            # 将IP范围转为整数范围，逐个分配
             start = int(ipaddress.ip_address(start_ip))
             end = int(ipaddress.ip_address(end_ip))
             

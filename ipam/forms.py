@@ -1,8 +1,14 @@
+"""
+IPAM模块 - 表单定义
+提供区域、VLAN、子网、IP分配、批量分配等表单
+"""
+
 from django import forms
 from .models import Region, VLAN, Subnet, IPAddress
 
 
 class RegionForm(forms.ModelForm):
+    """区域创建/编辑表单"""
     class Meta:
         model = Region
         fields = ['name', 'code', 'description']
@@ -14,6 +20,7 @@ class RegionForm(forms.ModelForm):
 
 
 class VLANForm(forms.ModelForm):
+    """VLAN创建/编辑表单"""
     class Meta:
         model = VLAN
         fields = ['vlan_id', 'name', 'region', 'purpose', 'gateway', 'description']
@@ -28,6 +35,7 @@ class VLANForm(forms.ModelForm):
 
 
 class SubnetForm(forms.ModelForm):
+    """子网创建/编辑表单 - 自动验证CIDR格式和网关归属"""
     class Meta:
         model = Subnet
         fields = ['name', 'cidr', 'gateway', 'region', 'vlan', 'purpose', 'description']
@@ -42,8 +50,9 @@ class SubnetForm(forms.ModelForm):
         }
     
     def clean_cidr(self):
-        cidr = self.cleaned_data['cidr']
+        """验证CIDR格式并自动计算掩码位数"""
         from common.ip_utils import validate_cidr
+        cidr = self.cleaned_data.get('cidr', '')
         if not validate_cidr(cidr):
             raise forms.ValidationError('无效的CIDR格式，请输入正确的网段地址，例如: 192.168.10.0/24')
         
@@ -55,8 +64,9 @@ class SubnetForm(forms.ModelForm):
         return cidr
     
     def clean_gateway(self):
-        gateway = self.cleaned_data.get('gateway')
+        """验证网关地址是否在子网范围内"""
         cidr = self.cleaned_data.get('cidr')
+        gateway = self.cleaned_data.get('gateway')
         
         if gateway and cidr:
             from common.ip_utils import ip_in_network
@@ -88,6 +98,7 @@ class IPAddressAllocateForm(forms.ModelForm):
         }
     
     def clean_mac_address(self):
+        """验证MAC地址格式（XX:XX:XX:XX:XX:XX）"""
         mac = self.cleaned_data.get('mac_address', '')
         if mac:
             import re
@@ -117,7 +128,7 @@ class IPBatchAllocateForm(forms.Form):
 
 
 class IPSearchForm(forms.Form):
-    """IP搜索表单"""
+    """IP搜索表单 - 支持按关键字、状态、子网筛选"""
     search = forms.CharField(required=False, label='搜索', widget=forms.TextInput(attrs={
         'class': 'form-control', 'placeholder': '搜索IP、主机名、MAC、设备名...'
     }))

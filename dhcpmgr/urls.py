@@ -1,3 +1,5 @@
+"""DHCP管理模块 - URL路由配置"""
+
 from django.urls import path
 from .views import (
     PoolListView, PoolDetailView, PoolCreateView, PoolUpdateView, PoolDeleteView,

@@ -52,7 +52,7 @@ class ScanHostResult:
 
 
 class PingScanner:
-    """Ping 探测器 - 支持跨平台"""
+    """Ping 探测器 - 支持跨平台(Linux/Windows/Mac)，解析ping命令输出获取延迟和丢包率"""
     
     def __init__(self, count: int = 3, timeout: float = 1.0):
         self.count = count
@@ -164,7 +164,7 @@ class PingScanner:
 
 
 class PortScanner:
-    """TCP 端口扫描器"""
+    """TCP 端口扫描器 - 支持TCP Connect扫描，自动获取服务Banner，并发扫描"""
     
     # 常见服务端口映射
     COMMON_SERVICES = {
@@ -184,7 +184,7 @@ class PortScanner:
         self.timeout = timeout
     
     def scan_port(self, ip: str, port: int) -> PortResult:
-        """扫描单个端口"""
+        """扫描单个端口 - TCP Connect方式连接，成功则尝试获取服务Banner"""
         result = PortResult(port=port, state='closed')
         result.service = self.COMMON_SERVICES.get(port, '')
         
@@ -213,7 +213,7 @@ class PortScanner:
         return result
     
     def scan_host(self, ip: str, ports: List[int], max_workers: int = 100) -> Dict[int, PortResult]:
-        """扫描单个主机的多个端口"""
+        """扫描单个主机的多个端口 - 使用线程池并发扫描"""
         results = {}
         
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -229,7 +229,7 @@ class PortScanner:
     
     @staticmethod
     def parse_ports(port_string: str) -> List[int]:
-        """解析端口字符串，支持逗号分隔和范围表示"""
+        """解析端口字符串 - 支持逗号分隔(22,80,443)和范围表示(1-1024)"""
         ports = set()
         parts = port_string.split(',')
         
@@ -257,7 +257,7 @@ class PortScanner:
 
 
 class ARPScanner:
-    """ARP 扫描器 - 获取本地网络MAC地址"""
+    """ARP 扫描器 - 获取本地网络MAC地址，通过系统arp命令读取ARP表"""
     
     @staticmethod
     def get_arp_table() -> Dict[str, str]:
@@ -293,7 +293,7 @@ class ARPScanner:
     
     @staticmethod
     def get_mac_vendor(mac_address: str) -> str:
-        """根据MAC地址前缀查询厂商（简化版，仅返回常见厂商）"""
+        """根据MAC地址OUI前缀查询厂商 - 简化版，仅包含常见网络设备厂商"""
         if not mac_address or len(mac_address) < 8:
             return ''
         
@@ -370,13 +370,13 @@ class ARPScanner:
 
 
 class DNSScanner:
-    """DNS 反向解析器"""
+    """DNS 反向解析器 - 通过socket反向查找IP对应的主机名"""
     
     def __init__(self, timeout: float = 2.0):
         self.timeout = timeout
     
     def reverse_lookup(self, ip: str) -> str:
-        """反向DNS查找"""
+        """反向DNS查找 - 通过gethostbyaddr获取主机名"""
         try:
             hostname, _, _ = socket.gethostbyaddr(ip)
             return hostname
@@ -388,7 +388,7 @@ class DNSScanner:
             return ""
     
     def reverse_batch(self, ips: List[str], max_workers: int = 30) -> Dict[str, str]:
-        """批量反向DNS查找"""
+        """批量反向DNS查找 - 使用线程池并发查询"""
         results = {}
         
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -406,7 +406,7 @@ class DNSScanner:
 
 
 class NetworkScanner:
-    """综合网络扫描器 - 整合所有探测能力"""
+    """综合网络扫描器 - 整合Ping/端口/ARP/DNS探测能力，支持子网批量扫描"""
     
     def __init__(self, ping_count: int = 3, ping_timeout: float = 1.0,
                  port_timeout: float = 2.0):
@@ -416,7 +416,7 @@ class NetworkScanner:
         self.dns_scanner = DNSScanner()
     
     def quick_scan(self, ip: str) -> ScanHostResult:
-        """快速扫描 - 仅Ping"""
+        """快速扫描 - 仅Ping检测主机是否在线，在线时顺便做DNS反解"""
         result = ScanHostResult(ip=ip)
         
         # Ping检测
@@ -431,7 +431,7 @@ class NetworkScanner:
         return result
     
     def full_scan(self, ip: str, ports: List[int] = None) -> ScanHostResult:
-        """完整扫描 - Ping + DNS + 端口 + ARP"""
+        """完整扫描 - Ping + DNS反解 + 端口扫描 + ARP查表"""
         result = self.quick_scan(ip)
         
         if result.is_online:

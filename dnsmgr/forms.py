@@ -1,9 +1,11 @@
+"""DNS管理模块 - 表单定义"""
+
 from django import forms
 from .models import DNSZone, DNSRecord, DNSSettings
 
 
 class DNSSettingsForm(forms.ModelForm):
-    """DNS全局配置表单"""
+    """DNS全局配置表单 - 验证转发器IP和端口范围"""
     class Meta:
         model = DNSSettings
         fields = ['enable_forward', 'forwarders', 'listen_port', 'listen_address',
@@ -25,6 +27,7 @@ class DNSSettingsForm(forms.ModelForm):
         }
 
     def clean_forwarders(self):
+        """验证转发器IP地址列表 - 逗号分隔，逐个校验IP格式"""
         forwarders = self.cleaned_data.get('forwarders', '').strip()
         if not forwarders:
             return ''
@@ -36,6 +39,7 @@ class DNSSettingsForm(forms.ModelForm):
         return ', '.join(ips)
 
     def clean_listen_port(self):
+        """验证监听端口范围 (1-65535)"""
         port = self.cleaned_data.get('listen_port', 53)
         if port < 1 or port > 65535:
             raise forms.ValidationError('端口范围: 1-65535')
@@ -43,6 +47,7 @@ class DNSSettingsForm(forms.ModelForm):
 
 
 class DNSZoneForm(forms.ModelForm):
+    """DNS区域创建/编辑表单"""
     class Meta:
         model = DNSZone
         fields = ['name', 'zone_type', 'primary_dns', 'description']
@@ -58,6 +63,7 @@ class DNSZoneForm(forms.ModelForm):
 
 
 class DNSRecordForm(forms.ModelForm):
+    """DNS记录创建/编辑表单 - 含类型校验和关联IP验证"""
     class Meta:
         model = DNSRecord
         fields = ['name', 'record_type', 'value', 'ttl', 'zone', 'linked_ip',
@@ -99,8 +105,9 @@ class DNSRecordForm(forms.ModelForm):
         }
     
     def clean_name(self):
-        name = self.cleaned_data['name'].strip()
+        """验证记录名称不为空，PTR记录特殊处理"""
         record_type = self.cleaned_data.get('record_type', '')
+        name = self.cleaned_data.get('name', '')
         
         # 基本校验
         if not name:
@@ -115,8 +122,9 @@ class DNSRecordForm(forms.ModelForm):
         return name
     
     def clean_value(self):
-        value = self.cleaned_data['value'].strip()
+        """验证记录值 - A/AAAA记录校验IP格式，MX记录校验格式"""
         record_type = self.cleaned_data.get('record_type', '')
+        value = self.cleaned_data.get('value', '')
         
         if not value:
             raise forms.ValidationError('记录值不能为空')
@@ -142,8 +150,9 @@ class DNSRecordForm(forms.ModelForm):
         return value
     
     def clean_linked_ip(self):
-        ip = self.cleaned_data.get('linked_ip')
+        """验证关联IP - 仅A/AAAA记录允许设置关联IP"""
         record_type = self.cleaned_data.get('record_type', '')
+        ip = self.cleaned_data.get('linked_ip', '')
         
         if ip and record_type not in ['A', 'AAAA']:
             # 非A/AAAA记录不应该有关联IP
@@ -158,6 +167,7 @@ class DNSRecordForm(forms.ModelForm):
 
 
 class DNSRecordSearchForm(forms.Form):
+    """DNS记录搜索表单 - 支持按名称/值搜索，按类型/区域/状态筛选"""
     search = forms.CharField(required=False, widget=forms.TextInput(attrs={
         'class': 'form-control', 'placeholder': '搜索记录名称或值...'
     }))

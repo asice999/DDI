@@ -8,7 +8,7 @@ from ipam.models import Subnet
 
 
 class ScanTaskForm(forms.ModelForm):
-    """扫描任务创建表单"""
+    """扫描任务创建表单 - 配置扫描类型、目标范围、Ping参数和端口"""
     
     class Meta:
         model = ScanTask
@@ -54,6 +54,7 @@ class ScanTaskForm(forms.ModelForm):
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        # 设置各字段的中文标签
         self.fields['name'].label = '任务名称'
         self.fields['task_type'].label = '扫描类型'
         self.fields['target_type'].label = '目标类型'
@@ -76,6 +77,7 @@ class ScanTaskForm(forms.ModelForm):
         self.fields['subnet'].empty_label = '-- 选择子网 --'
     
     def clean(self):
+        """自定义校验 - 根据目标类型验证必填字段，检查IP范围和端口配置"""
         cleaned_data = super().clean()
         target_type = cleaned_data.get('target_type')
         
@@ -110,7 +112,7 @@ class ScanTaskForm(forms.ModelForm):
 
 
 class DiscoveryRuleForm(forms.ModelForm):
-    """自动发现规则表单"""
+    """自动发现规则表单 - 配置定时扫描规则的目标子网和调度周期"""
     
     class Meta:
         model = DiscoveryRule

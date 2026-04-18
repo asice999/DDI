@@ -1,3 +1,8 @@
+"""
+公共IP工具库 - 提供CIDR验证、网络信息查询、IP归属判断等基础能力
+被IPAM/DNS/DHCP等多个模块引用
+"""
+
 import ipaddress
 from typing import List, Tuple
 

@@ -1,3 +1,9 @@
+"""
+IPAM模块 - 数据模型
+定义区域、VLAN、子网、IP地址等核心数据结构
+支持CIDR自动计算、IP状态约束、批量分配等能力
+"""
+
 from django.db import models
 from accounts.models import User
 
@@ -20,10 +26,12 @@ class Region(models.Model):
     
     @property
     def subnet_count(self):
+        """统计该区域下的子网数量"""
         return self.subnets.count()
     
     @property
     def vlan_count(self):
+        """统计该区域下的VLAN数量"""
         return self.vlans.count()
 
 
@@ -84,7 +92,7 @@ class Subnet(models.Model):
     
     @property
     def total_ips(self):
-        """总IP数"""
+        """总可用IP数（扣除网络地址和广播地址）"""
         from common.ip_utils import get_network_info
         info = get_network_info(self.cidr)
         return info['num_addresses'] - 2  # 减去网络地址和广播地址
@@ -96,7 +104,7 @@ class Subnet(models.Model):
     
     @property
     def available_ips(self):
-        """空闲IP数"""
+        """空闲IP数 = 总IP数 - 非空闲非禁用的IP数"""
         from common.ip_utils import get_network_info
         info = get_network_info(self.cidr)
         total = info['num_addresses'] - 2
@@ -139,24 +147,24 @@ class IPAddress(models.Model):
     device_type = models.CharField('设备类型', max_length=50, blank=True)
     binding_type = models.CharField('绑定方式', max_length=20, choices=BINDING_TYPE_CHOICES, 
                                     default='static')
-    dns_linked = models.BooleanField('DNS关联状态', default=False)
+    dns_linked = models.BooleanField('DNS关联状态', default=False)  # 标记该IP是否已关联DNS记录
     notes = models.TextField('备注', blank=True)
     created_at = models.DateTimeField('创建时间', auto_now_add=True)
     updated_at = models.DateTimeField('更新时间', auto_now=True)
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
-                                   related_name='created_ips', verbose_name='创建人')
+                                   related_name='created_ips', verbose_name='创建人')  # 记录IP分配操作人
     
     class Meta:
         verbose_name = 'IP地址'
         verbose_name_plural = verbose_name
-        unique_together = ['ip_address', 'subnet']
+        unique_together = ['ip_address', 'subnet']  # 同一子网内IP唯一
         ordering = ['ip_address']
     
     def __str__(self):
         return f"{self.ip_address} ({self.get_status_display()})"
     
     def allocate(self, **kwargs):
-        """分配IP"""
+        """分配IP - 将状态置为allocated，并填充分配信息（主机名、MAC地址等）"""
         self.status = 'allocated'
         for key, value in kwargs.items():
             if hasattr(self, key):
@@ -164,7 +172,7 @@ class IPAddress(models.Model):
         self.save()
     
     def release(self):
-        """释放IP"""
+        """释放IP - 将状态置为available，并清空所有分配信息"""
         self.status = 'available'
         self.hostname = ''
         self.mac_address = ''

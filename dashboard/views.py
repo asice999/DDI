@@ -1,3 +1,8 @@
+"""
+仪表盘模块 - 首页汇总展示视图
+聚合IPAM/DNS/DHCP/设备/审计等模块的统计数据，并检测告警信息
+"""
+
 from django.shortcuts import render
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count
@@ -10,24 +15,24 @@ from logs.models import OperationLog
 
 @login_required
 def index(request):
-    """首页仪表盘"""
+    """首页仪表盘 - 展示全局统计、子网使用率图表、VLAN分布、DNS记录分布、告警信息"""
     
     # ========== 基础统计 ==========
     stats = {
-        # IPAM 统计
+        # IPAM 统计 - 区域数/子网数/IP总数/各状态IP数
         'region_count': Region.objects.count(),
         'subnet_count': Subnet.objects.count(),
         'ip_total': IPAddress.objects.count(),
-        'ip_allocated': IPAddress.objects.filter(status='allocated').count(),
-        'ip_available': IPAddress.objects.filter(status='available').count(),
-        'ip_reserved': IPAddress.objects.filter(status='reserved').count(),
-        'ip_conflict': IPAddress.objects.filter(status='conflict').count(),
+        'ip_allocated': IPAddress.objects.filter(status='allocated').count(),  # 已分配
+        'ip_available': IPAddress.objects.filter(status='available').count(),  # 空闲
+        'ip_reserved': IPAddress.objects.filter(status='reserved').count(),    # 保留
+        'ip_conflict': IPAddress.objects.filter(status='conflict').count(),    # 冲突
         
-        # DNS 统计
+        # DNS 统计 - 区域数/记录数
         'dns_zone_count': DNSZone.objects.count(),
         'dns_record_count': DNSRecord.objects.count(),
         
-        # DHCP 统计
+        # DHCP 统计 - 启用的地址池数/活跃租约数
         'dhcp_pool_count': DHCPPool.objects.filter(status='enabled').count(),
         'dhcp_active_lease': DHCPLease.objects.filter(status='active').count(),
         
@@ -35,13 +40,13 @@ def index(request):
         'device_count': Device.objects.count(),
     }
     
-    # 计算IP使用率
+    # 计算IP使用率（已分配/总数）
     if stats['ip_total'] > 0:
         stats['ip_usage_percent'] = round((stats['ip_allocated'] / stats['ip_total']) * 100, 1)
     else:
         stats['ip_usage_percent'] = 0
     
-    # ========== 子网使用情况（用于图表）==========
+    # ========== 子网使用情况（用于图表，最多展示前10个子网）==========
     subnet_stats = []
     for subnet in Subnet.objects.all()[:10]:
         total_ips = subnet.total_ips if hasattr(subnet, 'total_ips') else 0
@@ -57,7 +62,7 @@ def index(request):
             'usage_rate': round((allocated / total_ips) * 100, 1) if total_ips > 0 else 0,
         })
     
-    # ========== 各VLAN地址分布 ==========
+    # ========== 各VLAN地址分布（用于图表，最多展示8个VLAN）==========
     vlan_data = []
     vlans_with_subnets = Subnet.objects.values('vlan__vlan_id', 'vlan__name').annotate(
         ip_count=Count('ip_addresses')
@@ -70,20 +75,20 @@ def index(request):
             'count': item['ip_count'],
         })
     
-    # ========== DNS记录类型分布 ==========
+    # ========== DNS记录类型分布（用于饼图）==========
     dns_type_stats = DNSRecord.objects.values('record_type').annotate(
         count=Count('id')
     ).order_by('-count')
     
     dns_types = {item['record_type']: item['count'] for item in dns_type_stats}
     
-    # ========== 最近操作记录 ==========
+    # ========== 最近操作记录（最多展示15条）==========
     recent_logs = OperationLog.objects.select_related('user')[:15]
     
-    # ========== 告警信息 ==========
+    # ========== 告警信息（高使用率子网、IP冲突）==========
     alerts = []
     
-    # 检测高使用率子网(>80%)
+    # 检测高使用率子网（>80%警告，>90%危险）
     for subnet in Subnet.objects.all():
         if hasattr(subnet, 'usage_percent') and subnet.usage_percent > 80:
             alerts.append({
@@ -92,7 +97,7 @@ def index(request):
                 'type': 'subnet_usage'
             })
     
-    # 检测冲突IP
+    # 检测冲突IP（存在冲突IP时发出危险告警）
     conflict_count = stats.get('ip_conflict', 0)
     if conflict_count > 0:
         alerts.append({
@@ -107,6 +112,7 @@ def index(request):
         'vlan_data': vlan_data,
         'dns_types': dns_types,
         'recent_logs': recent_logs,
+        # 最多展示5条告警
         'alerts': alerts[:5],
     }
     

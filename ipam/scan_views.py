@@ -153,7 +153,7 @@ def execute_scan(request, pk):
 
 
 def _run_scan_task(task_pk):
-    """在后台线程中执行扫描任务"""
+    """在后台线程中执行扫描任务 - 分阶段执行：Ping检测->端口扫描->结果入库"""
     from django.core.cache import cache
     
     task = ScanTask.objects.get(pk=task_pk)
@@ -180,7 +180,7 @@ def _run_scan_task(task_pk):
             ping_timeout=task.ping_timeout,
         )
         
-        # 进度回调函数
+        # 进度回调函数 - 更新扫描进度到缓存，供前端AJAX轮询获取
         def progress_callback(current, total, message=None):
             task.scanned_count = current
             task.save(update_fields=['scanned_count'])
@@ -199,7 +199,7 @@ def _run_scan_task(task_pk):
             callback=progress_callback,
         )
         
-        # 保存结果到数据库
+        # 保存结果到数据库 - 逐条写入ScanResult，同时检测新主机和状态冲突
         online_count = 0
         offline_count = 0
         
@@ -225,7 +225,7 @@ def _run_scan_task(task_pk):
                 }
             )
             
-            # 检查是否为新发现主机
+            # 检查是否为新发现主机（系统中未登记的IP）
             ip_records = IPAddress.objects.filter(ip_address=host_result.ip)
             if host_result.is_online and not ip_records.exists():
                 result_obj.is_new_host = True
@@ -234,16 +234,13 @@ def _run_scan_task(task_pk):
             
             # 检查状态冲突（系统显示已分配但实际不在线）
             allocated_record = ip_records.filter(status='allocated').first()
-            if allocated_record:
-                if not host_result.is_online:
-                    result_obj.status_conflict = True
             
             result_obj.save()
             
             if host_result.is_online:
                 online_count += 1
                 
-                # 记录探测历史
+                # 记录探测历史 - 保留每次探测结果供历史查询
                 ProbeHistory.objects.create(
                     ip_address=host_result.ip,
                     subnet=task.subnet,
@@ -321,7 +318,7 @@ def cancel_scan(request, pk):
 
 @login_required
 def quick_ping(request):
-    """快速Ping探测单个IP (AJAX)"""
+    """快速Ping探测单个IP (AJAX) - 返回在线状态、延迟、丢包率、TTL"""
     ip = request.GET.get('ip', '')
     if not ip:
         return JsonResponse({'error': '请提供IP地址'}, status=400)
@@ -338,7 +335,7 @@ def quick_ping(request):
     scanner = PingScanner(count=3, timeout=1.0)
     result = scanner.ping(ip)
     
-    # 记录历史
+    # 记录探测历史 - 保留每次探测结果供历史查询
     ProbeHistory.objects.create(
         ip_address=ip,
         is_online=result.success,
@@ -358,7 +355,7 @@ def quick_ping(request):
 
 @login_required
 def quick_port_scan(request):
-    """快速端口扫描单个IP (AJAX)"""
+    """快速端口扫描单个IP (AJAX) - 返回开放端口列表和服务信息"""
     ip = request.GET.get('ip', '')
     ports_str = request.GET.get('ports', '22,80,443')
     
@@ -388,7 +385,7 @@ def quick_port_scan(request):
                 'banner': result.banner[:100] if result.banner else '',
             })
     
-    # 记录历史
+    # 记录探测历史 - 能进行端口扫描说明主机在线
     ProbeHistory.objects.create(
         ip_address=ip,
         is_online=True,  # 能进行端口扫描说明主机在线
@@ -407,7 +404,7 @@ def quick_port_scan(request):
 
 @login_required
 def probe_history(request):
-    """探测历史记录"""
+    """探测历史记录 - 支持按IP和来源筛选，最多展示100条"""
     ip_filter = request.GET.get('ip', '')
     source_filter = request.GET.get('source', '')
     
@@ -430,7 +427,7 @@ def probe_history(request):
 
 @login_required
 def discovery_rules(request):
-    """自动发现规则管理"""
+    """自动发现规则管理页面 - 展示所有发现规则及其关联子网"""
     rules = DiscoveryRule.objects.all().select_related('subnet')
     
     context = {
@@ -575,7 +572,7 @@ def quick_allocate_ip(request):
 
 @login_required
 def live_topology(request):
-    """实时网络拓扑展示（基于最近扫描数据）"""
+    """实时网络拓扑展示 - 基于最近扫描数据按子网分组展示在线主机"""
     # 获取最近的在线主机（保持QuerySet，不提前切片）
     recent_probes_qs = ProbeHistory.objects.filter(is_online=True).order_by('-probed_at')
     

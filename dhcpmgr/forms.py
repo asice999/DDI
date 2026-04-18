@@ -1,8 +1,11 @@
+"""DHCP管理模块 - 表单定义"""
+
 from django import forms
 from .models import DHCPPool, DHCPExclusion, DHCPLease
 
 
 class DHCPPoolForm(forms.ModelForm):
+    """地址池创建/编辑表单 - 验证地址范围是否在子网内"""
     class Meta:
         model = DHCPPool
         fields = ['name', 'subnet', 'start_address', 'end_address', 'gateway',
@@ -32,6 +35,7 @@ class DHCPPoolForm(forms.ModelForm):
         }
     
     def clean(self):
+        """验证地址范围是否在子网内，且起始<=结束"""
         cleaned_data = super().clean()
         subnet = cleaned_data.get('subnet')
         start_addr = cleaned_data.get('start_address')
@@ -55,6 +59,7 @@ class DHCPPoolForm(forms.ModelForm):
 
 
 class DHCPExclusionForm(forms.ModelForm):
+    """排除地址创建/编辑表单 - 验证排除范围在地址池内"""
     class Meta:
         model = DHCPExclusion
         fields = ['pool', 'start_ip', 'end_ip', 'reason', 'notes']
@@ -67,6 +72,7 @@ class DHCPExclusionForm(forms.ModelForm):
         }
     
     def clean(self):
+        """验证排除范围在地址池内且起始<=结束"""
         cleaned_data = super().clean()
         pool = cleaned_data.get('pool')
         start_ip = cleaned_data.get('start_ip')
@@ -90,6 +96,7 @@ class DHCPExclusionForm(forms.ModelForm):
 
 
 class DHCPLeaseForm(forms.ModelForm):
+    """租约创建/编辑表单"""
     class Meta:
         model = DHCPLease
         fields = ['ip_address', 'mac_address', 'hostname', 'device_identifier',
@@ -115,6 +122,7 @@ class DHCPLeaseForm(forms.ModelForm):
         }
     
     def clean_mac_address(self):
+        """验证MAC地址格式 - 必须为 XX:XX:XX:XX:XX:XX 格式"""
         mac = self.cleaned_data.get('mac_address', '')
         if mac:
             import re
@@ -125,6 +133,7 @@ class DHCPLeaseForm(forms.ModelForm):
 
 
 class DHCPLeaseSearchForm(forms.Form):
+    """租约搜索表单 - 支持按IP/MAC/主机名搜索和按状态/地址池筛选"""
     search = forms.CharField(required=False, widget=forms.TextInput(attrs={
         'class': 'form-control', 'placeholder': '搜索IP、MAC或主机名...'
     }))

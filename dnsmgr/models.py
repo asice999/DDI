@@ -1,9 +1,14 @@
+"""
+DNS管理模块 - 数据模型
+定义DNS全局配置、区域、资源记录、探测任务、解析日志等
+"""
+
 from django.db import models
 from django.conf import settings
 
 
 class DNSSettings(models.Model):
-    """DNS全局配置 - 单例模式"""
+    """DNS全局配置 - 单例模式，整个系统仅维护一份配置"""
     # 是否启用转发功能
     enable_forward = models.BooleanField('启用外部转发', default=True,
         help_text='启用后，本地无记录的域名将转发到上游DNS服务器查询')
@@ -33,7 +38,7 @@ class DNSSettings(models.Model):
 
     @classmethod
     def get_settings(cls):
-        """获取或创建单例配置"""
+        """获取或创建单例配置 - 确保系统中始终存在且仅有一份配置"""
         obj, _ = cls.objects.get_or_create(pk=1)
         return obj
 
@@ -43,7 +48,7 @@ class DNSSettings(models.Model):
 
 
 class DNSZone(models.Model):
-    """DNS区域表 - 正向区域和反向区域"""
+    """DNS区域表 - 支持正向区域和反向区域"""
     ZONE_TYPE_CHOICES = (
         ('forward', '正向区域'),
         ('reverse', '反向区域'),
@@ -74,7 +79,7 @@ class DNSZone(models.Model):
 
 
 class DNSRecord(models.Model):
-    """DNS记录表"""
+    """DNS记录表 - 支持7种记录类型(A/AAAA/CNAME/PTR/MX/TXT/NS)，含探测端口和优先级"""
     RECORD_TYPE_CHOICES = (
         ('A', 'A (IPv4地址)'),
         ('AAAA', 'AAAA (IPv6地址)'),
@@ -102,9 +107,9 @@ class DNSRecord(models.Model):
                                              blank=True, null=True)
     status = models.CharField('状态', max_length=20, choices=STATUS_CHOICES, default='enabled')
     probe_port = models.IntegerField('探测端口', blank=True, null=True,
-                                    help_text='关联服务探测端口，创建时自动探测该IP:Port的可达性')
+                                    help_text='关联服务探测端口，创建时自动探测该IP:Port的可达性')  # 用于健康探测
     priority = models.IntegerField('优先级', default=0, blank=True, null=True,
-                                   help_text='MX记录优先级')
+                                   help_text='MX记录优先级')  # 同名同类记录按优先级选取最优
     description = models.TextField('备注', blank=True)
     created_at = models.DateTimeField('创建时间', auto_now_add=True)
     updated_at = models.DateTimeField('更新时间', auto_now=True)
@@ -120,14 +125,14 @@ class DNSRecord(models.Model):
         return f"{self.name} {self.record_type} {self.value}"
     
     def get_ptr_suggestion(self):
-        """获取PTR记录建议"""
+        """获取PTR记录建议 - 根据A记录的关联IP自动生成反向解析域名"""
         if self.record_type == 'A' and self.linked_ip:
             from common.ip_utils import generate_ptr_record
             return generate_ptr_record(self.linked_ip)
         return ''
     
     def get_fqdn(self):
-        """获取完整域名"""
+        """获取完整域名 - 将记录名与区域名拼接为FQDN"""
         if self.zone.zone_type == 'forward':
             if self.name.endswith(self.zone.name):
                 return self.name
@@ -135,16 +140,18 @@ class DNSRecord(models.Model):
         return self.name
     
     def enable(self):
+        """启用记录"""
         self.status = 'enabled'
         self.save()
     
     def disable(self):
+        """禁用记录"""
         status = 'disabled'
         self.save()
 
 
 class ProbeTask(models.Model):
-    """服务探测任务 - 持久化存储"""
+    """服务探测任务 - 持久化存储，由前端定时调度执行探测"""
     TASK_STATUS_CHOICES = (
         ('running', '运行中'),
         ('paused',  '已暂停'),
@@ -168,7 +175,7 @@ class ProbeTask(models.Model):
     last_message   = models.CharField('最近消息', max_length=200, blank=True, default='')
     # 历史记录（JSON，存最近30条状态）
     history       = models.TextField('历史记录', blank=True, default='[]',
-                                     help_text='JSON数组，存最近30条探测结果摘要')
+                                     help_text='JSON数组，存最近30条探测结果摘要')  # 环形缓冲区
 
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
                                    verbose_name='创建者', related_name='probe_tasks')
@@ -196,7 +203,7 @@ class ProbeTask(models.Model):
 
 
 class DNSQueryLog(models.Model):
-    """DNS解析记录查询日志 - 最大存储10000条"""
+    """DNS解析记录查询日志 - 最大存储10000条，超出自动清理最旧记录"""
     SOURCE_CHOICES = (
         ('local', '本地解析'),
         ('forward', '外部转发'),
@@ -257,7 +264,7 @@ class DNSQueryLog(models.Model):
 
     @classmethod
     def create_log(cls, **kwargs):
-        """创建日志条目（自动清理超限数据）"""
+        """创建日志条目（自动清理超限数据 - 保留最新10000条）"""
         log_obj = cls.objects.create(**kwargs)
         # 保持最多10000条，超出则删除最旧的
         total = cls.objects.count()

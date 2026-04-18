@@ -1,3 +1,8 @@
+"""
+设备管理模块 - 数据模型
+定义设备（主机）及其网络接口，支持多网卡/IP关联/DNS联动
+"""
+
 from django.db import models
 from accounts.models import User
 from ipam.models import Region, IPAddress
@@ -46,7 +51,7 @@ class Device(models.Model):
     
     @property
     def linked_dns_records(self):
-        """关联的DNS记录"""
+        """查询该设备关联IP地址对应的所有DNS记录（跨模块联动）"""
         if not self.ip_address:
             return []
         from dnsmgr.models import DNSRecord

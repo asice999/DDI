@@ -1,9 +1,14 @@
+"""
+DHCP管理模块 - 数据模型
+定义DHCP地址池、排除地址、租约等数据结构
+"""
+
 from django.db import models
 from ipam.models import Subnet
 
 
 class DHCPPool(models.Model):
-    """DHCP地址池"""
+    """DHCP地址池 - 定义IP分配范围、网关、DNS、租约时间等"""
     STATUS_CHOICES = (
         ('enabled', '启用'),
         ('disabled', '禁用'),
@@ -16,9 +21,9 @@ class DHCPPool(models.Model):
     end_address = models.GenericIPAddressField('结束地址')
     gateway = models.GenericIPAddressField('网关', blank=True, null=True)
     dns_servers = models.CharField('DNS服务器', max_length=500, blank=True,
-                                   help_text='多个DNS用逗号分隔')
+                                   help_text='多个DNS用逗号分隔')  # 如: 8.8.8.8, 114.114.114.114
     lease_time = models.IntegerField('租约时间(秒)', default=86400,
-                                     help_text='默认86400秒(24小时)')
+                                     help_text='默认86400秒(24小时)')  # 默认1天
     status = models.CharField('状态', max_length=20, choices=STATUS_CHOICES, default='enabled')
     description = models.TextField('描述', blank=True)
     created_at = models.DateTimeField('创建时间', auto_now_add=True)
@@ -52,7 +57,7 @@ class DHCPPool(models.Model):
         return self.total_addresses - self.allocated_count - excluded_count
     
     def is_valid_range(self):
-        """检查地址范围是否在子网内"""
+        """检查地址范围是否在子网内且起始<=结束"""
         from common.ip_utils import ip_in_network
         if not self.subnet:
             return False
@@ -68,7 +73,7 @@ class DHCPPool(models.Model):
 
 
 class DHCPExclusion(models.Model):
-    """DHCP排除地址"""
+    """DHCP排除地址 - 地址池中不参与分配的IP范围"""
     pool = models.ForeignKey(DHCPPool, on_delete=models.CASCADE, related_name='exclusions',
                              verbose_name='所属地址池')
     start_ip = models.GenericIPAddressField('起始IP')
@@ -87,7 +92,7 @@ class DHCPExclusion(models.Model):
 
 
 class DHCPLease(models.Model):
-    """DHCP租约"""
+    """DHCP租约 - 记录IP地址与MAC地址的绑定关系及租期"""
     STATUS_CHOICES = (
         ('active', '活跃'),
         ('expired', '过期'),
@@ -115,10 +120,11 @@ class DHCPLease(models.Model):
     
     @property
     def is_expired(self):
+        """判断租约是否已过期（当前时间超过结束时间且状态仍为active）"""
         from django.utils import timezone
         return timezone.now() > self.end_time and self.status == 'active'
     
     def release(self):
-        """释放租约"""
+        """释放租约 - 将状态置为released"""
         self.status = 'released'
         self.save()

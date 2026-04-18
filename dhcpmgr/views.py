@@ -1,3 +1,8 @@
+"""
+DHCP管理模块 - 视图函数
+提供地址池CRUD、排除地址管理、租约管理、服务启停等功能
+"""
+
 from django.shortcuts import render, redirect, get_object_or_404
 from django.views.generic import CreateView, UpdateView, DeleteView, ListView, DetailView
 from django.contrib.auth.decorators import login_required
@@ -15,11 +20,13 @@ import time
 # ========== DHCP地址池管理 ==========
 @method_decorator([login_required], name='dispatch')
 class PoolListView(ListView):
+    """地址池列表视图 - 支持按名称/CIDR搜索，预加载子网信息"""
     model = DHCPPool
     template_name = 'dhcpmgr/pool_list.html'
     context_object_name = 'pools'
     
     def get_queryset(self):
+        """预加载子网关联数据，支持按地址池名称和子网CIDR模糊搜索"""
         queryset = super().get_queryset().select_related('subnet')
         search = self.request.GET.get('search', '')
         if search:
@@ -30,25 +37,29 @@ class PoolListView(ListView):
 
 @method_decorator([login_required], name='dispatch')
 class PoolDetailView(DetailView):
+    """地址池详情视图 - 展示排除地址和租约列表"""
     model = DHCPPool
     template_name = 'dhcpmgr/pool_detail.html'
     context_object_name = 'pool'
     
     def get_context_data(self, **kwargs):
+        """加载排除地址列表和最近50条租约"""
         context = super().get_context_data(**kwargs)
         context['exclusions'] = self.object.exclusions.all()
-        context['leases'] = self.object.leases.all()[:50]
+        context['leases'] = self.object.leases.all()[:50]  # 限制数量，避免大量租约拖慢页面
         return context
 
 
 @method_decorator([login_required], name='dispatch')
 class PoolCreateView(CreateView):
+    """创建地址池视图"""
     model = DHCPPool
     form_class = DHCPPoolForm
     template_name = 'dhcpmgr/pool_form.html'
     success_url = reverse_lazy('dhcpmgr:pool_list')
     
     def form_valid(self, form):
+        """创建成功后记录操作日志"""
         messages.success(self.request, f'DHCP地址池 {form.instance.name} 创建成功')
         log_operation(self.request.user, '新增', 'dhcp', 'pool', '', str(form.instance))
         return super().form_valid(form)
@@ -56,6 +67,7 @@ class PoolCreateView(CreateView):
 
 @method_decorator([login_required], name='dispatch')
 class PoolUpdateView(UpdateView):
+    """编辑地址池视图 - 修改地址范围、网关、DNS、租约时间等"""
     model = DHCPPool
     form_class = DHCPPoolForm
     template_name = 'dhcpmgr/pool_form.html'
@@ -64,6 +76,7 @@ class PoolUpdateView(UpdateView):
 
 @method_decorator([login_required], name='dispatch')
 class PoolDeleteView(DeleteView):
+    """删除地址池视图 - 删除前需用户确认"""
     model = DHCPPool
     template_name = 'dhcpmgr/confirm_delete.html'
     success_url = reverse_lazy('dhcpmgr:pool_list')
@@ -71,7 +84,7 @@ class PoolDeleteView(DeleteView):
 
 @login_required
 def toggle_pool_status(request, pk):
-    """启用/禁用地址池"""
+    """启用/禁用地址池 - 切换地址池的启用状态"""
     pool = get_object_or_404(DHCPPool, pk=pk)
     old_status = pool.get_status_display()
     
@@ -91,6 +104,7 @@ def toggle_pool_status(request, pk):
 # ========== 排除地址管理 ==========
 @method_decorator([login_required], name='dispatch')
 class ExclusionCreateView(CreateView):
+    """创建排除地址视图 - 排除地址范围内的IP不参与DHCP分配"""
     model = DHCPExclusion
     form_class = DHCPExclusionForm
     template_name = 'dhcpmgr/exclusion_form.html'
@@ -112,6 +126,7 @@ class ExclusionCreateView(CreateView):
 
 @method_decorator([login_required], name='dispatch')
 class ExclusionUpdateView(UpdateView):
+    """编辑排除地址视图"""
     model = DHCPExclusion
     form_class = DHCPExclusionForm
     template_name = 'dhcpmgr/exclusion_form.html'
@@ -122,6 +137,7 @@ class ExclusionUpdateView(UpdateView):
 
 @method_decorator([login_required], name='dispatch')
 class ExclusionDeleteView(DeleteView):
+    """删除排除地址视图 - 删除后跳回地址池详情页"""
     model = DHCPExclusion
     template_name = 'dhcpmgr/confirm_delete.html'
     
@@ -137,12 +153,14 @@ class ExclusionDeleteView(DeleteView):
 # ========== 租约管理 ==========
 @method_decorator([login_required], name='dispatch')
 class LeaseListView(ListView):
+    """租约列表视图 - 支持按IP/MAC/主机名搜索和按状态/地址池筛选"""
     model = DHCPLease
     template_name = 'dhcpmgr/lease_list.html'
     context_object_name = 'leases'
     paginate_by = 25
     
     def get_queryset(self):
+        """预加载地址池和子网关联数据，支持多条件筛选"""
         queryset = super().get_queryset().select_related('pool', 'pool__subnet')
         
         form = DHCPLeaseSearchForm(self.request.GET)
@@ -169,7 +187,7 @@ class LeaseListView(ListView):
 
 @login_required
 def lease_create(request):
-    """手动添加租约"""
+    """手动添加租约 - 用于静态绑定等场景"""
     if request.method == 'POST':
         form = DHCPLeaseForm(request.POST)
         if form.is_valid():
@@ -185,7 +203,7 @@ def lease_create(request):
 
 @login_required
 def lease_release(request, pk):
-    """释放租约"""
+    """释放租约 - 将租约状态置为released"""
     lease = get_object_or_404(DHCPLease, pk=pk)
     
     if request.method == 'POST':
@@ -200,7 +218,7 @@ def lease_release(request, pk):
 
 @login_required
 def check_expired_leases(request):
-    """检查过期租约"""
+    """检查过期租约 - 批量将超时未续约的active租约标记为expired"""
     now = timezone.now()
     expired_leases = DHCPLease.objects.filter(
         status='active',
@@ -217,7 +235,7 @@ def check_expired_leases(request):
 # ========== DHCP服务管理 ==========
 @login_required
 def dhcp_service_page(request):
-    """DHCP服务管理页面"""
+    """DHCP服务管理页面 - 展示服务状态和地址池列表"""
     from .dhcp_server import get_dhcp_server
     server = get_dhcp_server()
     
@@ -251,7 +269,7 @@ def dhcp_service_start(request):
                 'success': success,
                 'message': message,
                 'status': server.get_status(),
-            })
+            })  # AJAX请求直接返回JSON
         
         # 普通表单提交：带消息重定向回页面
         from django.contrib import messages
@@ -264,6 +282,7 @@ def dhcp_service_start(request):
     except Exception as e:
         error_msg = f'启动异常: {str(e)}'
         
+        # 异常处理：根据请求类型返回对应格式
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
             return JsonResponse({
                 'success': False,
@@ -324,7 +343,7 @@ def dhcp_service_stop(request):
 
 @login_required
 def dhcp_service_status(request):
-    """获取DHCP服务状态 (AJAX)"""
+    """获取DHCP服务状态（AJAX接口） - 返回运行状态、运行时间、地址池等"""
     from .dhcp_server import get_dhcp_server
     server = get_dhcp_server()
     
