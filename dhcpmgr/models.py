@@ -53,8 +53,15 @@ class DHCPPool(models.Model):
     @property
     def available_count(self):
         """可用数量（排除保留地址后）"""
-        excluded_count = self.exclusions.count()
-        return self.total_addresses - self.allocated_count - excluded_count
+        import ipaddress
+        # 计算所有排除地址段中的IP总数（避免重复）
+        excluded_ips = set()
+        for excl in self.exclusions.all():
+            start = int(ipaddress.ip_address(excl.start_ip))
+            end = int(ipaddress.ip_address(excl.end_ip))
+            for i in range(start, end + 1):
+                excluded_ips.add(i)
+        return self.total_addresses - self.allocated_count - len(excluded_ips)
     
     def is_valid_range(self):
         """检查地址范围是否在子网内且起始<=结束"""
@@ -114,6 +121,13 @@ class DHCPLease(models.Model):
         verbose_name = 'DHCP租约'
         verbose_name_plural = verbose_name
         ordering = ['-end_time']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['ip_address'],
+                condition=models.Q(status='active'),
+                name='unique_active_ip'
+            )
+        ]
     
     def __str__(self):
         return f"{self.ip_address} -> {self.mac_address}"

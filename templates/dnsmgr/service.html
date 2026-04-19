@@ -101,27 +101,32 @@
                 <form method="post" id="settingsForm">{% csrf_token %}
                     <input type="hidden" name="action" value="save_settings">
 
-                    <div class="row g-3 align-items-end">
-                        <div class="col-md-8">
-                            <label class="form-label fw-bold">
-                                <i class="bi bi-router me-1"></i> 转发器地址
-                                <span class="text-danger">*</span>
-                            </label>
+                    <!-- 转发器地址 -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">
+                            <i class="bi bi-router me-1"></i> 转发器地址 <span class="text-danger">*</span>
+                        </label>
+                        <div class="input-group">
                             <input type="text" name="forwarders" value="{{ settings.forwarders }}"
                                    class="form-control form-control-lg"
                                    placeholder="8.8.8.8, 114.114.114.114, 223.5.5.5">
-                            <div class="form-text">多个IP用英文逗号分隔，最多支持10个</div>
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label fw-bold">启用转发</label>
-                            <div class="form-check form-switch mt-1 ps-0">
-                                <input type="checkbox" name="enable_forward" value="true"
-                                       class="form-check-input" role="switch" style="width:48px;height:24px;"
-                                       {% if settings.enable_forward %}checked{% endif %}>
-                                <label class="form-check-label ms-2">
-                                    {% if settings.enable_forward %}<span class="text-success">已开启{% else %}<span class="text-muted">已关闭{% endif %}</span>
-                                </label>
+                            <div class="input-group-text bg-light">
+                                <div class="form-check form-switch my-0">
+                                    <input type="checkbox" name="enable_forward" value="true"
+                                           class="form-check-input"
+                                           {% if settings.enable_forward %}checked{% endif %}
+                                           id="enableForwardChk">
+                                    <label class="form-check-label fw-semibold small" for="enableForwardChk">启用转发</label>
+                                </div>
                             </div>
+                        </div>
+                        <div class="form-text d-flex justify-content-between">
+                            <span>多个IP用英文逗号分隔，最多支持10个</span>
+                            {% if settings.enable_forward %}
+                                <span class="text-success"><i class="bi bi-check-circle me-1"></i>已开启</span>
+                            {% else %}
+                                <span class="text-muted"><i class="bi bi-x-circle me-1"></i>已关闭</span>
+                            {% endif %}
                         </div>
                     </div>
 
@@ -147,23 +152,18 @@
 
                     <hr class="my-3">
 
-                    <div class="row g-3">
-                        <div class="col-md-6">
-                            <label class="form-label">启用查询缓存</label>
-                            <div class="form-check form-switch mt-1 ps-0">
-                                <input type="checkbox" name="enable_cache" value="true"
-                                       class="form-check-input" role="switch"
-                                       {% if settings.enable_cache %}checked{% endif %}>
-                                <label class="form-check-label ms-2 small text-muted">
-                                    缓存外部查询结果以加速响应
-                                </label>
-                            </div>
+                    <div class="d-flex align-items-center gap-3">
+                        <span class="fw-semibold text-nowrap">启用查询缓存</span>
+                        <div class="btn-group btn-group-sm">
+                            <button type="button" class="btn {% if settings.enable_cache %}btn-success{% else %}btn-outline-secondary{% endif %}" id="cacheToggleOn" onclick="toggleCache(true)">开启</button>
+                            <button type="button" class="btn {% if settings.enable_cache %}btn-outline-secondary{% else %}btn-danger{% endif %}" id="cacheToggleOff" onclick="toggleCache(false)">关闭</button>
                         </div>
-                        <div class="col-md-6">
-                            <label class="form-label">缓存过期时间(秒)</label>
-                            <input type="number" name="cache_ttl" value="{{ settings.cache_ttl }}"
-                                   class="form-control" min="30" max="3600">
-                        </div>
+                        <input type="hidden" name="enable_cache" id="enableCacheInput" value="{% if settings.enable_cache %}true{% else %}{% endif %}">
+                        <script>function toggleCache(v){document.getElementById('enableCacheInput').value=v?'true':'';var on=document.getElementById('cacheToggleOff');var off=document.getElementById('cacheToggleOn');if(v){on.className='btn btn-outline-secondary';off.className='btn btn-success';}else{on.className='btn btn-danger';off.className='btn btn-outline-secondary';}}</script>
+                        <span class="fw-semibold text-nowrap">缓存过期时间(秒)</span>
+                        <input type="number" name="cache_ttl" value="{{ settings.cache_ttl }}"
+                               class="form-control form-control-sm" style="width:90px;" min="30" max="3600">
+                        <small class="text-muted text-nowrap ms-auto">— 缓存外部查询以加速响应</small>
                     </div>
 
                     <div class="mt-3 pt-3 border-top">
@@ -297,6 +297,9 @@
 .btn-xs { padding: 1px 8px; font-size: 11.5px; border-radius: 4px; }
 .quick-add { cursor: pointer; transition: all .15s; }
 .quick-add:hover { transform: scale(1.05); }
+.dns-switch {
+    /* 使用 Bootstrap 原生 form-switch 尺寸 */
+}
 </style>
 
 <script>

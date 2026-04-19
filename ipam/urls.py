@@ -11,7 +11,9 @@ from .scan_views import (
     scan_index, create_scan_task, scan_task_detail, execute_scan,
     get_scan_progress, cancel_scan, quick_ping, quick_port_scan,
     probe_history, discovery_rules, delete_scan_task, export_scan_results,
-    live_topology, quick_allocate_ip
+    live_topology, quick_allocate_ip,
+    switch_list, switch_create, switch_update, switch_delete,
+    switch_test_connection,
 )
 
 app_name = 'ipam'
@@ -62,4 +64,11 @@ urlpatterns = [
     path('scan/history/', probe_history, name='probe_history'),
     path('scan/rules/', discovery_rules, name='discovery_rules'),
     path('scan/topology/', live_topology, name='live_topology'),
+
+    # 交换机设备管理
+    path('scan/switches/', switch_list, name='switch_list'),
+    path('scan/switches/create/', switch_create, name='switch_create'),
+    path('scan/switches/<int:pk>/edit/', switch_update, name='switch_edit'),
+    path('scan/switches/<int:pk>/delete/', switch_delete, name='switch_delete'),
+    path('api/switch-test/<int:pk>/', switch_test_connection, name='switch_test'),
 ]

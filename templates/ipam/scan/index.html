@@ -60,18 +60,18 @@
         </div>
         
         <div class="col-md-6 col-lg-3 mb-3">
-            <a href="{% url 'ipam:scan_create' %}?type=full" class="text-decoration-none">
+            <a href="{% url 'ipam:scan_create' %}?type=switch_arp" class="text-decoration-none">
                 <div class="card border-left-warning h-100 hover-shadow">
                     <div class="card-body">
                         <div class="row align-items-center">
                             <div class="col-auto">
                                 <div class="icon-circle bg-warning text-white">
-                                    <i class="bi bi-globe"></i>
+                                    <i class="bi bi-hdd-network"></i>
                                 </div>
                             </div>
                             <div class="col ms-2">
-                                <h5 class="mb-0">综合扫描</h5>
-                                <small class="text-muted">Ping+DNS+端口+ARP</small>
+                                <h5 class="mb-0">交换机ARP</h5>
+                                <small class="text-muted">SSH获取活跃IP-MAC</small>
                             </div>
                         </div>
                     </div>
@@ -198,7 +198,7 @@
                                         {% endif %}
                                     </td>
                                     <td>
-                                        <span class="badge rounded-pill {% if task.task_type == 'ping' %}bg-primary{% elif task.task_type == 'port' %}bg-success{% elif task.task_type == 'full' %}bg-warning{% else %}bg-secondary{% endif %}">
+                                        <span class="badge rounded-pill {% if task.task_type == 'ping' %}bg-primary{% elif task.task_type == 'port' %}bg-success{% elif task.task_type == 'switch_arp' %}bg-warning{% else %}bg-secondary{% endif %}">
                                             {{ task.get_task_type_display }}
                                         </span>
                                     </td>

@@ -73,6 +73,11 @@ class PoolUpdateView(UpdateView):
     template_name = 'dhcpmgr/pool_form.html'
     success_url = reverse_lazy('dhcpmgr:pool_list')
 
+    def form_valid(self, form):
+        messages.success(self.request, f'地址池 {form.instance.name} 更新成功')
+        log_operation(self.request.user, '编辑', 'dhcp', 'pool', '', str(form.instance))
+        return super().form_valid(form)
+
 
 @method_decorator([login_required], name='dispatch')
 class PoolDeleteView(DeleteView):
@@ -179,6 +184,9 @@ class LeaseListView(ListView):
                 )
             if status:
                 queryset = queryset.filter(status=status)
+            else:
+                # 默认不显示已释放的租约
+                queryset = queryset.exclude(status='released')
             if pool:
                 queryset = queryset.filter(pool=pool)
         
@@ -191,6 +199,33 @@ def lease_create(request):
     if request.method == 'POST':
         form = DHCPLeaseForm(request.POST)
         if form.is_valid():
+            # 检查该IP是否已有其他MAC的活跃租约
+            ip = form.cleaned_data.get('ip_address')
+            mac = form.cleaned_data.get('mac_address', '').upper()
+            existing = DHCPLease.objects.filter(
+                ip_address=ip,
+                status='active'
+            ).exclude(mac_address=mac).first()
+            if existing:
+                messages.error(
+                    request,
+                    f'IP {ip} 已被 MAC={existing.mac_address} 占用，请先释放该租约后再创建'
+                )
+                return render(request, 'dhcpmgr/lease_form.html', {'form': form})
+
+            # 检查该MAC是否已有其他IP的活跃租约（同一MAC仅保留一条）
+            old_leases = DHCPLease.objects.filter(
+                mac_address=mac,
+                status='active',
+            ).exclude(ip_address=ip)
+            if old_leases.exists():
+                ips = list(old_leases.values_list('ip_address', flat=True))
+                messages.warning(
+                    request,
+                    f'MAC {mac} 已有活跃租约 ({", ".join(ips)})，已自动释放旧租约'
+                )
+                old_leases.update(status='released')
+
             lease = form.save()
             messages.success(request, f'租约 {lease.ip_address} 创建成功')
             log_operation(request.user, '新增', 'dhcp', 'lease', '', str(lease))
@@ -229,6 +264,28 @@ def check_expired_leases(request):
     expired_leases.update(status='expired')
     
     messages.info(request, f'已更新 {count} 条过期租约状态')
+    return redirect('dhcpmgr:lease_list')
+
+
+@login_required
+def release_all_leases(request):
+    """一键释放所有活跃租约 - 将所有active状态租约置为released"""
+    if request.method != 'POST':
+        return redirect('dhcpmgr:lease_list')
+
+    count = DHCPLease.objects.filter(status='active').update(status='released')
+    
+    # 同时清空DHCP服务内存中的分配记录
+    try:
+        from .dhcp_server import get_dhcp_server
+        server = get_dhcp_server()
+        with server._lock:
+            server._allocated_ips.clear()
+    except Exception:
+        pass
+
+    messages.success(request, f'已释放全部 {count} 条活跃租约')
+    log_operation(request.user, '批量释放', 'dhcp', 'lease', '', f'释放{count}条租约')
     return redirect('dhcpmgr:lease_list')
 
 

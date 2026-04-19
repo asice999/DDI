@@ -13,8 +13,9 @@ import json
 import threading
 
 from ipam.models import Subnet, IPAddress
-from ipam.scan_models import ScanTask, ScanResult, DiscoveryRule, ProbeHistory
-from ipam.scanner import NetworkScanner, PortScanner
+from ipam.scan_models import ScanTask, ScanResult, DiscoveryRule, ProbeHistory, SwitchDevice
+from ipam.scanner import NetworkScanner, PortScanner, SwitchARPScanner
+from common.logger import log_operation
 
 
 # 全局扫描任务存储（用于跟踪正在运行的任务）
@@ -153,7 +154,7 @@ def execute_scan(request, pk):
 
 
 def _run_scan_task(task_pk):
-    """在后台线程中执行扫描任务 - 分阶段执行：Ping检测->端口扫描->结果入库"""
+    """在后台线程中执行扫描任务 - 分阶段执行：Ping检测->端口扫描->结果入库 / 交换机ARP获取"""
     from django.core.cache import cache
     
     task = ScanTask.objects.get(pk=task_pk)
@@ -164,34 +165,33 @@ def _run_scan_task(task_pk):
     _running_tasks[task_pk] = {'status': 'running'}
     
     try:
-        # 获取目标IP列表
+        # ========== 交换机 ARP 获取（独立流程） ==========
+        if task.task_type == 'switch_arp':
+            return _run_switch_arp_scan(task, task_pk)
+
+        # ========== 原有扫描流程 ==========
         target_ips = task.get_target_ips()
         task.total_targets = len(target_ips)
         task.save(update_fields=['total_targets'])
         
-        # 解析端口配置
         ports = None
         if task.ports and task.task_type in ('port', 'full'):
             ports = PortScanner.parse_ports(task.ports)
         
-        # 创建扫描器
         scanner = NetworkScanner(
             ping_count=task.ping_count,
             ping_timeout=task.ping_timeout,
         )
         
-        # 进度回调函数 - 更新扫描进度到缓存，供前端AJAX轮询获取
         def progress_callback(current, total, message=None):
             task.scanned_count = current
             task.save(update_fields=['scanned_count'])
-            # 更新缓存供前端查询
             cache.set(f'scan_progress_{task_pk}', {
                 'current': current,
                 'total': total,
                 'message': message or '',
             }, timeout=300)
         
-        # 执行扫描
         scan_results = scanner.subnet_scan(
             ips=target_ips,
             task_type=task.task_type,
@@ -199,7 +199,6 @@ def _run_scan_task(task_pk):
             callback=progress_callback,
         )
         
-        # 保存结果到数据库 - 逐条写入ScanResult，同时检测新主机和状态冲突
         online_count = 0
         offline_count = 0
         
@@ -225,14 +224,12 @@ def _run_scan_task(task_pk):
                 }
             )
             
-            # 检查是否为新发现主机（系统中未登记的IP）
             ip_records = IPAddress.objects.filter(ip_address=host_result.ip)
             if host_result.is_online and not ip_records.exists():
                 result_obj.is_new_host = True
             else:
                 result_obj.is_new_host = False
             
-            # 检查状态冲突（系统显示已分配但实际不在线）
             allocated_record = ip_records.filter(status='allocated').first()
             
             result_obj.save()
@@ -240,7 +237,6 @@ def _run_scan_task(task_pk):
             if host_result.is_online:
                 online_count += 1
                 
-                # 记录探测历史 - 保留每次探测结果供历史查询
                 ProbeHistory.objects.create(
                     ip_address=host_result.ip,
                     subnet=task.subnet,
@@ -254,7 +250,6 @@ def _run_scan_task(task_pk):
             else:
                 offline_count += 1
         
-        # 更新任务状态
         task.status = 'completed'
         task.completed_at = timezone.now()
         task.scanned_count = len(scan_results)
@@ -264,10 +259,93 @@ def _run_scan_task(task_pk):
         
         _running_tasks[task_pk] = {'status': 'completed'}
         
-        # 清除缓存
         cache.delete(f'scan_progress_{task_pk}')
         
     except Exception as e:
+        task.status = 'failed'
+        task.notes = str(e)
+        task.completed_at = timezone.now()
+        task.save(update_fields=['status', 'notes', 'completed_at'])
+        
+        _running_tasks[task_pk] = {'status': 'failed', 'error': str(e)}
+
+
+def _run_switch_arp_scan(task, task_pk):
+    """执行交换机ARP获取任务"""
+    from django.core.cache import cache
+    
+    switch = task.switch_device
+    if not switch:
+        raise ValueError('未选择交换机设备')
+    
+    cache.set(f'scan_progress_{task_pk}', {
+        'current': 0, 'total': 1,
+        'message': f'正在连接 {switch.name} ({switch.ip_address}) ...',
+    }, timeout=300)
+    
+    scanner = SwitchARPScanner(timeout=30)
+    
+    try:
+        scan_results = scanner.fetch_arp(switch)
+        
+        # 更新交换机状态
+        switch.last_success_at = timezone.now()
+        switch.last_error = ''
+        switch.save(update_fields=['last_success_at', 'last_error'])
+        
+        online_count = 0
+        for i, host_result in enumerate(scan_results):
+            cache.set(f'scan_progress_{task_pk}', {
+                'current': i + 1, 'total': len(scan_results),
+                'message': f'处理: {host_result.ip} ({host_result.mac_address})',
+            }, timeout=300)
+            
+            result_obj, created = ScanResult.objects.update_or_create(
+                task=task,
+                ip_address=host_result.ip,
+                defaults={
+                    'is_online': True,
+                    'ping_success': True,
+                    'mac_address': host_result.mac_address,
+                    'vendor': host_result.vendor,
+                    'reverse_dns': host_result.reverse_dns or '',
+                    'open_ports': {},
+                }
+            )
+            
+            ip_records = IPAddress.objects.filter(ip_address=host_result.ip)
+            if not ip_records.exists():
+                result_obj.is_new_host = True
+            else:
+                result_obj.is_new_host = False
+            
+            result_obj.save()
+            online_count += 1
+            
+            ProbeHistory.objects.create(
+                ip_address=host_result.ip,
+                subnet=switch.subnet,
+                is_online=True,
+                mac_address=host_result.mac_address,
+                source='task',
+                task=task,
+            )
+        
+        task.status = 'completed'
+        task.completed_at = timezone.now()
+        task.total_targets = len(scan_results)
+        task.scanned_count = len(scan_results)
+        task.online_count = online_count
+        task.offline_count = 0
+        task.save()
+        
+        _running_tasks[task_pk] = {'status': 'completed'}
+        cache.delete(f'scan_progress_{task_pk}')
+        
+    except Exception as e:
+        switch.last_error = str(e)[:500]
+        switch.save(update_fields=['last_error'])
+        
         task.status = 'failed'
         task.notes = str(e)
         task.completed_at = timezone.now()
@@ -568,6 +646,103 @@ def quick_allocate_ip(request):
         return JsonResponse({'success': False, 'error': '子网不存在'}, status=404)
     except Exception as e:
         return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+
+# ========== 交换机设备管理 ==========
+
+@login_required
+def switch_list(request):
+    """交换机设备列表"""
+    switches = SwitchDevice.objects.all().order_by('name')
+    context = {
+        'switches': switches,
+        'page_title': '交换机设备管理',
+    }
+    return render(request, 'ipam/scan/switch_list.html', context)
+
+
+@login_required
+def switch_create(request):
+    """新增交换机设备"""
+    from .scan_forms import SwitchDeviceForm
+    
+    if request.method == 'POST':
+        form = SwitchDeviceForm(request.POST)
+        if form.is_valid():
+            switch = form.save()
+            messages.success(request, f'交换机「{switch.name}」已添加')
+            log_operation(
+                user=request.user,
+                module='IPAM-探测',
+                operation_type='新增',
+                obj_type='交换机设备',
+                new_value=str(switch),
+            )
+            return redirect('ipam:switch_list')
+    else:
+        form = SwitchDeviceForm()
+    
+    return render(request, 'ipam/scan/switch_form.html', {'form': form})
+
+
+@login_required
+def switch_update(request, pk):
+    """编辑交换机设备"""
+    switch = get_object_or_404(SwitchDevice, pk=pk)
+    from .scan_forms import SwitchDeviceForm
+    
+    if request.method == 'POST':
+        form = SwitchDeviceForm(request.POST, instance=switch)
+        if form.is_valid():
+            sw = form.save()
+            messages.success(request, f'交换机「{sw.name}」已更新')
+            log_operation(
+                user=request.user,
+                module='IPAM-探测',
+                operation_type='编辑',
+                obj_type='交换机设备',
+                new_value=str(sw),
+            )
+            return redirect('ipam:switch_list')
+    else:
+        form = SwitchDeviceForm(instance=switch)
+    
+    return render(request, 'ipam/scan/switch_form.html', {'form': form, 'switch': switch})
+
+
+@login_required
+@require_POST
+def switch_delete(request, pk):
+    """删除交换机设备"""
+    switch = get_object_or_404(SwitchDevice, pk=pk)
+    name = switch.name
+    switch.delete()
+    messages.success(request, f'交换机「{name}」已删除')
+    log_operation(
+        user=request.user,
+        module='IPAM-探测',
+        operation_type='删除',
+        obj_type=f'交换机设备: {name}',
+    )
+    return redirect('ipam:switch_list')
+
+
+@login_required
+def switch_test_connection(request, pk):
+    """测试交换机SSH连接 (AJAX)"""
+    switch = get_object_or_404(SwitchDevice, pk=pk)
+    
+    success, msg = SwitchARPScanner.test_connection(switch)
+    
+    if success:
+        switch.last_success_at = timezone.now()
+        switch.last_error = ''
+        switch.save(update_fields=['last_success_at', 'last_error'])
+        return JsonResponse({'success': True, 'message': msg})
+    else:
+        switch.last_error = msg[:500]
+        switch.save(update_fields=['last_error'])
+        return JsonResponse({'success': False, 'error': msg}, status=400)
 
 
 @login_required

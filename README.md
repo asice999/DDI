@@ -8,65 +8,45 @@
   <img src="https://img.shields.io/badge/Python-3.11+-blue" />
   <img src="https://img.shields.io/badge/Django-4.x-green" />
   <img src="https://img.shields.io/badge/Bootstrap-5.3-purple" />
-  <img src="https://img.shields.io/badge/License-MIT-orange" />
+  <img src="https://img.shields.io/badge/Chart.js-4.x-yellow" />
 </p>
 
 ---
 
 ## 一、项目简介
 
-合力数据 DDI 管理系统是一个基于 **Python + Django** 开发的轻量级网络资源管理平台，统一管理企业内部的 **IP 地址（IPAM）**、**DHCP 地址分配** 和 **DNS 解析记录**。系统采用中文本土化设计，内置服务模拟引擎与网络探测功能，适合中小型企业的网络运维场景。
+**合力数据 DDI 管理系统** 是一套基于 **Python / Django** 开发的轻量级 Web 网络基础设施管理平台，统一管理企业内部的 **IP 地址（IPAM）**、**DHCP 地址分配** 和 **DNS 域名解析记录**。系统采用中文本土化设计，内置 DNS/DHCP 服务模拟引擎与网络探测功能，适合中小型企业的网络运维场景。
 
 ### 核心亮点
 
 | 特性 | 说明 |
 |------|------|
 | **DDI 三合一** | IPAM + DNS + DHCP 统一管理，告别分散维护 |
-| **网络探测子系统** | 内置 Ping / 端口扫描 / 拓扑发现引擎 |
+| **网络探测子系统** | 内置 Ping / 端口扫描 / 拓扑发现引擎，后台异步执行 |
 | **服务模拟引擎** | DNS 服务端模拟 (~36KB) + DHCP 服务模拟 (~19KB) |
 | **服务健康探测** | DNS 记录级别端口可达性探测 + 持久化定时任务 |
-| **全链路审计** | 操作日志 + 登录日志双轨记录 |
-| **多接口设备** | 支持一台设备多个网卡 (DeviceInterface) |
-| **轻量依赖** | 仅需 `Django` + `gunicorn` 两个包 |
+| **全链路审计** | 操作日志 + 登录日志双轨记录，支持多维度筛选 |
+| **多接口设备** | 支持一台设备多个网卡 (DeviceInterface)，IP 可搜索关联绑定 |
+| **轻量依赖** | 仅需 `Django` + `gunicorn` 两个包即可运行 |
 
 ---
 
 ## 二、功能模块总览
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     合力数据 DDI 管理系统                      │
-├──────────┬──────────┬──────────┬──────────┬────────────────┤
-│   IPAM   │   DNS    │   DHCP   │  设备管理  │    系统管理     │
-│          │          │          │            │                │
-│ 区域管理  │ 正向区域  │ 地址池    │ 设备主机   │ 用户管理        │
-│ VLAN管理  │ 反向区域  │ 排除地址  │ 多网卡     │ 角色权限        │
-│ 子网管理  │ A/AAAA   │ 租约管理  │ IP关联    │ 操作日志        │
-│ IP地址   │ CNAME    │ 服务启停  │ DNS联动   │ 登录日志        │
-│          │ PTR/MX   │          │           │                │
-│ 网络探测  │ TXT/NS   │          │           │                │
-│ Ping检测  │ 解析日志  │          │           │                │
-│ 端口扫描  │ 服务探测  │          │           │                │
-│ 实时拓扑  │ 在线测试  │          │           │                │
-└──────────┴──────────┴──────────┴──────────┴────────────────┘
-                              │
-                    ┌─────────┴─────────┐
-                    │     首页仪表盘      │
-                    │  统计卡片 / 图表    │
-                    │  告警 / 最近操作    │
-                    └───────────────────┘
-```
+### 界面预览
+![alt text](/pic/home_page.png)
 
 ### 各模块详细说明
 
-| 模块 | 路由前缀 | 数据模型 | 核心功能 |
-|------|----------|----------|----------|
-| **仪表盘** | `/` | — | 全局统计卡片、IP 使用率饼图、子网柱状图、DNS 类型分布、VLAN 分布图、告警面板、最近 15 条操作日志 |
-| **IPAM** | `/ipam/` | Region, VLAN, Subnet, IPAddress (+4 扫描模型) | 区域/园区管理、VLAN 管理、CIDR 子网 CRUD 与自动计算、IP 分配/释放/保留/批量分配、Ping 探测、端口扫描、实时拓扑图、探测历史与规则 |
-| **DNS 管理** | `/dns/` | DNSSettings, DNSZone, DNSRecord, ProbeTask, DNSQueryLog | 正向/反向区域、7 种记录类型(A/AAAA/CNAME/PTR/MX/TXT/NS)、PTR 自动建议、FQDN 生成、DNS 解析在线测试、服务健康探测、持久化探测任务、解析日志(本地/转发/缓存/NXDOMAIN) |
-| **DHCP 管理** | `/dhcp/` | DHCPPool, DHCPExclusion, DHCPLease | 地址池 CRUD(起止地址/网关/DNS/租期)、排除地址范围、租约记录(IP-MAC-租期)、DHCP 服务启停控制、过期租约检查 |
-| **设备管理** | `/devices/` | Device, DeviceInterface | 11 种设备类型登记、多网卡接口支持、IP 关联绑定、DNS 记录联动查询 |
-| **用户认证** | `/accounts/` | Role, User(AbstractUser), LoginLog | 登录/登出、用户 CRUD(含编辑时修改密码)、4 种角色(admin/network_admin/operator/auditor)、密码重置、登录成功/失败日志 |
+| 模块 | 路由前缀 | 核心功能 |
+|------|----------|----------|
+| **仪表盘** | `/` | 全局统计卡片（10项指标）、IP使用率饼图、子网柱状图、DNS类型分布饼图、VLAN分布图、告警面板、最近15条操作日志 |
+| **IPAM** | `/ipam/` | 区域/VLAN/子网/IP四级层级管理、CIDR自动计算、单IP分配/批量分配/释放保留、Ping探测、端口扫描、实时拓扑图、CSV导出、自动发现规则 |
+| **DNS 管理** | `/dns/` | 正向/反向区域管理、7种记录类型(A/AAAA/CNAME/PTR/MX/TXT/NS)、PTR自动建议/FQDN生成、DNS解析在线测试、服务启停控制(转发器/缓存)、健康探测任务、查询日志 |
+| **DHCP 管理** | `/dhcp/` | 地址池CRUD(起止地址/网关/DNS/租期)、排除地址范围、租约记录与释放、过期租约检查、DHCP服务启停控制 |
+| **设备管理** | `/devices/` | 11种设备类型登记、多网卡接口支持、IP关联绑定(带Select2搜索选择)、设备删除确认、DNS记录联动查询 |
+| **用户认证** | `/accounts/` | 登录/登出、用户CRUD(含密码修改)、4种角色(admin/network_admin/operator/auditor)、账号启用禁用、登录成功/失败日志 |
+| **审计日志** | `/logs/` | 全量操作记录追溯、按模块/时间/用户筛选、变更前后值对比展示 |
 
 ---
 
@@ -75,9 +55,10 @@
 | 层面 | 技术 | 版本 |
 |------|------|------|
 | **后端框架** | Python / Django | >=4.2, <5.0 |
-| **前端 UI** | Django Template / Bootstrap 5 / Chart.js / Bootstrap Icons | 5.3.2 / 4.4.1 / 1.11.1 |
+| **前端 UI** | Django Template / Bootstrap 5 / Chart.js / Bootstrap Icons | 5.3 / 4.x / 1.x |
+| **前端增强** | Select2 (jQuery插件) | — (CDN引入) |
 | **数据库** | SQLite 3 | 可迁移至 MySQL/PostgreSQL |
-| **WSGI 服务器** | Gunicorn | >=21.0.0 |
+| **WSGI 服务器** | Gunicorn (生产) / Django Dev Server (开发) | >=21.0 |
 | **语言/时区** | 简体中文 (zh-hans) / Asia/Shanghai | — |
 | **认证方式** | Django Session Auth (扩展 User 模型) | — |
 
@@ -93,25 +74,19 @@
 ### 安装步骤
 
 ```bash
-# 1. 进入项目目录
-cd ddi_system
 
-# 2. 创建虚拟环境（推荐）
-python -m venv venv
-source venv/bin/activate      # Linux/macOS
-# 或: venv\Scripts\activate  # Windows
 
-# 3. 安装依赖
+# 1. 安装依赖
 pip install -r requirements.txt
 
-# 4. 数据库迁移
+# 2. 数据库迁移
 python manage.py makemigrations
 python manage.py migrate
 
-# 5. 初始化示例数据（推荐首次运行）
+# 3. 初始化示例数据（推荐首次运行）
 python init_data.py
 
-# 6. 启动开发服务器
+# 4. 启动开发服务器
 python manage.py runserver 0.0.0.0:8000
 ```
 
@@ -123,6 +98,20 @@ python manage.py runserver 0.0.0.0:8000
 |------|-----|
 | 默认账号 | `admin` |
 | 默认密码 | `Admin@123` |
+
+### 快捷脚本启动/停止
+
+```bash
+# 开发模式启动
+./start.sh dev              # Django runserver, http://0.0.0.0:8000
+
+# 生产模式启动（Gunicorn 后台守护进程）
+./start.sh prod             # Gunicorn 4 workers, http://0.0.0.0:8000
+
+# 停止服务（优雅停止 / 强制停止）
+./stop.sh                   # 优雅停止
+./stop.sh -k                # 强制停止 (SIGKILL)
+```
 
 ### 生产环境部署
 
@@ -143,72 +132,71 @@ ddi_system/
 ├── manage.py                          # Django 入口文件
 ├── init_data.py                       # 初始化数据脚本 (角色/管理员/示例数据)
 ├── requirements.txt                   # 依赖: Django + gunicorn
+├── start.sh                           # 启动脚本 (dev/prod 模式)
+├── stop.sh                            # 停止脚本 (优雅/强制)
 ├── README.md                          # 本文档
 │
 ├── ddi_system/                        # Django 项目配置包
-│   ├── __init__.py
 │   ├── settings.py                    # 全局配置 (INSTALLED_APPS/数据库/中间件)
-│   ├── urls.py                        # 主路由分发 (8 个模块)
+│   ├── urls.py                        # 主路由分发 (7 个模块)
 │   ├── wsgi.py                        # WSGI 部署入口
 │   └── asgi.py                        # ASGI 异步入口
 │
 ├── accounts/                          # 用户认证与角色管理
 │   ├── models.py                      # Role, User(AbstractUser), LoginLog
 │   ├── views.py                       # 登录/登出/CRUD/重置密码
-│   ├── forms.py                       # LoginForm/UserCreateForm/UserEditForm
-│   └── urls.py                        # 9 条路由
+│   ├── forms.py                       # 登录/用户创建/编辑表单
+│   └── urls.py                        # 路由定义
 │
 ├── dashboard/                         # 首页仪表盘
 │   ├── views.py                       # index() 统计聚合视图
-│   └── urls.py                        # 首页路由
+│   └── templates/index.html           # 仪表盘页面 (卡片+图表)
 │
-├── ipam/                              # IP 地址管理 (IPAM) — 最复杂模块
+├── ipam/                              # IP 地址管理 (最复杂模块)
 │   ├── models.py                      # Region, VLAN, Subnet, IPAddress
 │   ├── views.py                       # CRUD + 分配/释放/批量操作
 │   ├── forms.py                       # CIDR/MAC 校验表单
 │   ├── scan_models.py                 # ScanTask/DiscoveryRule/ProbeResult/TopologyNode
-│   ├── scan_views.py                  # 探测视图 (19KB)
-│   ├── scan_forms.py                  # 探测表单
-│   ├── scanner.py                     # Ping/端口扫描/TCP引擎 (18KB)
-│   └── urls.py                        # 28 条路由 (含探测 API)
+│   ├── scan_views.py                  # 探测视图
+│   ├── scanner.py                     # Ping/端口扫描/TCP引擎
+│   └── urls.py                        # 含探测 API 共 28 条路由
 │
-├── dnsmgr/                            # DNS 管理 — 最大模块
+├── dnsmgr/                            # DNS 管理 (最大模块)
 │   ├── models.py                      # DNSSettings/DNSZone/DNSRecord/ProbeTask/DNSQueryLog
-│   ├── views.py                       # 区域/记录/探测/解析测试 (38KB)
-│   ├── forms.py                       # DNS 记录表单
-│   ├── dns_server.py                  # DNS 服务核心实现 (36KB)
-│   └── urls.py                        # 20 条路由
+│   ├── views.py                       # 区域/记录/探测/解析测试/服务配置
+│   ├── forms.py                       # DNS 记录表单 (7种类型智能字段)
+│   ├── dns_server.py                  # DNS 服务核心实现 (~36KB)
+│   └── urls.py                        # 共 20 条路由
 │
 ├── dhcpmgr/                           # DHCP 管理
 │   ├── models.py                      # DHCPPool/DHCPExclusion/DHCPLease
 │   ├── views.py                       # 地址池/排除/租约/DHCP 服务
-│   ├── forms.py                       # DHCP 表单
-│   ├── dhcp_server.py                 # DHCP 服务模拟 (19KB)
-│   └── urls.py                        # 14 条路由
+│   ├── dhcp_server.py                 # DHCP 服务模拟 (~19KB)
+│   └── urls.py                        # 共 14 条路由
 │
 ├── devices/                           # 设备/主机管理
 │   ├── models.py                      # Device, DeviceInterface (多网卡)
 │   ├── views.py                       # 设备 CRUD + IP 关联
-│   ├── forms.py                       # 设备表单
-│   └── urls.py                        # 6 条路由
+│   ├── forms.py                       # 设备表单 (含 IP 地址 Select2 搜索)
+│   └── urls.py                        # 共 6 条路由
 │
 ├── logs/                              # 日志审计
 │   ├── models.py                      # OperationLog
 │   ├── views.py                       # 操作日志列表与筛选
-│   └── urls.py                        # 1 条路由
+│   └── urls.py                        # 操作日志路由
 │
 ├── common/                            # 公共工具包
 │   ├── ip_utils.py                    # IP 工具 (CIDR验证/PTR生成/网段计算)
 │   └── logger.py                      # 操作日志统一记录器
 │
-└── templates/                         # HTML 模板 (46 个文件)
+└── templates/                         # HTML 模板 (47 个文件)
     ├── base.html                      # 布局基座 (固定侧边栏 + 顶栏 + 响应式)
-    ├── accounts/                      # 登录/用户列表/表单/登录日志
-    ├── dashboard/                     # 仪表盘 (统计卡片 + 4 组图表)
+    ├── accounts/                      # 登录页/用户列表/表单/登录日志
+    ├── dashboard/                     # 仪表盘 (统计卡片 + 4 组 Chart.js 图表)
     ├── ipam/                          # 区域/VLAN/子网/IP 列表详情表单 + 探测全套页面
-    ├── dnsmgr/                        # DNS 服务/区域详情/记录表单/探测/解析日志
+    ├── dnsmgr/                        # DNS 服务页(缓存按钮组)/区域详情/记录表单/探测/解析日志
     ├── dhcpmgr/                       # 地址池详情/租约列表/排除/服务状态
-    ├── devices/                       # 设备列表/详情/表单
+    ├── devices/                       # 设备列表/详情/表单/删除确认
     └── logs/                          # 操作日志
 ```
 
@@ -224,9 +212,8 @@ ddi_system/
 | `/ipam/` | IPAM | `regions/*`, `vlans/*`, `subnets/*`, `ips/*`, `scan/*`, `api/*` | 28 |
 | `/dns/` | DNS | `service/*`, `zones/*`, `records/*`, `probe/*`, `query-log/*` | 20 |
 | `/dhcp/` | DHCP | `pools/*`, `exclusions/*`, `leases/*`, `service/*` | 14 |
-| `/devices/` | 设备 | `(list)`, `create`, `<pk>/edit`, `<pk>/<delete>`, `<pk>/link-ip/<ip>` | 6 |
+| `/devices/` | 设备 | `(list)`, `create`, `<pk>/edit`, `<pk>/delete`, `<pk>/link-ip/<ip>` | 6 |
 | `/logs/` | 日志 | `operation_log` | 1 |
-| `/` | 首页 | 重定向到 dashboard:index | — |
 
 **总计**: 79+ 条 URL 路由
 
@@ -336,22 +323,27 @@ logs
 - 显示默认账号提示
 
 ### 首页仪表盘
-- 10 个统计卡片 (IP总数/已分配/空闲/保留/冲突/子网数/DNS记录/DHCP池/活跃租约/设备数)
-- 4 组 Chart.js 图表: IP使用率饼图、子网使用柱状图、DNS记录类型分布、VLAN地址分布
+- 4 个统计卡片 (运行状态/累计查询/缓存条目/区域数)
+- 4 组 Chart.js 图表: IP使用率环形图、子网堆叠柱状图、DNS记录类型分布饼图、VLAN横向柱状图
 - 告警面板 (高使用率/冲突IP检测)
-- 最近 15 条操作记录
+- 最近操作记录
 
 ### 左侧导航栏
-- 固定侧边栏，240px 展开态 / 60px 收起态
+- 固定侧边栏，展开态 / 收起态
 - 6 个一级菜单分组 + 折叠二级菜单
-- 当前页面精确高亮 (url_name 匹配)
+- 当前页面精确高亮
 - 底部显示当前用户信息
 
-### 各功能页面
-- 统一 Bootstrap 5 卡片风格
-- 表格支持分页 (20条/页)
-- 表单内联校验与错误提示
-- 操作按钮带图标 (bi-*)
+### DNS 服务管理页
+- 外部转发器地址输入框 + 启用开关一体化布局
+- 查询缓存开关 (按钮组 [开启][关闭])
+- 配置摘要面板 + 公共DNS快捷添加
+- 解析流程可视化步骤
+
+### 设备管理
+- 设备列表 (含删除按钮)
+- 编辑时可搜索关联 IP 地址 (Select2 下拉框)
+- 删除二次确认页面
 
 ---
 
@@ -371,10 +363,13 @@ logs
 - [ ] Docker 容器化部署与 Compose 编排
 
 ---
-## 联系作者(请备注软件名称)
-![alt text](bb054614a6958e5f989de649e626b4bf.png)
 
-## 十三、许可证
+## 联系作者(请备注软件名称)
+![微信二维码](/pic/wx.png)
+
+---
+
+## 许可证
 
 Apache License 2.0
 

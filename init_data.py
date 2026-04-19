@@ -16,6 +16,7 @@ django.setup()
 
 from accounts.models import User, Role
 from ipam.models import Region, VLAN, Subnet, IPAddress
+from ipam.scan_models import SwitchDevice
 from dnsmgr.models import DNSZone, DNSRecord
 from dhcpmgr.models import DHCPPool, DHCPExclusion, DHCPLease
 from devices.models import Device
@@ -261,6 +262,35 @@ def sample_dhcp():
         print(f"  ✓ 创建DHCP池: {pool.name}")
 
 
+def sample_switch_devices():
+    """创建示例交换机设备数据"""
+    subnet = Subnet.objects.filter(cidr='192.168.31.0/24').first()
+    if not subnet:
+        subnet = Subnet.objects.first()
+
+    switches = [
+        {
+            'name': 'config',
+            'vendor': 'huawei',
+            'ip_address': '192.168.31.2',
+            'port': 22,
+            'username': 'admin',
+            'password': 'Cisco1234!',
+            'enable_password': '',
+            'subnet': subnet,
+            'is_active': True,
+        },
+    ]
+
+    for sw in switches:
+        obj, created = SwitchDevice.objects.get_or_create(
+            name=sw['name'],
+            defaults=sw
+        )
+        if created:
+            print(f"  ✓ 创建交换机设备: {obj.name} ({obj.vendor}) - {obj.ip_address}")
+
+
 def sample_devices():
     """创建示例设备数据"""
     devices = [
@@ -333,7 +363,8 @@ def main():
     sample_dns()
     sample_dhcp()
 
-    print("\n[6/6] 创建示例设备...")
+    print("\n[6/6] 创建示例设备和交换机...")
+    sample_switch_devices()
     sample_devices()
 
     print("\n" + "="*60)

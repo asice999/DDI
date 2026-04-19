@@ -5,7 +5,7 @@ from .views import (
     PoolListView, PoolDetailView, PoolCreateView, PoolUpdateView, PoolDeleteView,
     toggle_pool_status,
     ExclusionCreateView, ExclusionUpdateView, ExclusionDeleteView,
-    LeaseListView, lease_create, lease_release, check_expired_leases,
+    LeaseListView, lease_create, lease_release, check_expired_leases, release_all_leases,
     dhcp_service_page, dhcp_service_start, dhcp_service_stop, dhcp_service_status
 )
 
@@ -30,6 +30,7 @@ urlpatterns = [
     path('leases/create/', lease_create, name='lease_create'),
     path('leases/<int:pk>/release/', lease_release, name='lease_release'),
     path('leases/check-expired/', check_expired_leases, name='check_expired'),
+    path('leases/release-all/', release_all_leases, name='release_all'),
     
     # DHCP服务管理
     path('service/', dhcp_service_page, name='service'),

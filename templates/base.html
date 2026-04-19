@@ -379,6 +379,10 @@
                        style="{% if request.resolver_match.url_name == 'scan_index' or request.resolver_match.url_name == 'scan_create' or request.resolver_match.url_name == 'scan_detail' or request.resolver_match.url_name == 'scan_execute' or request.resolver_match.url_name == 'scan_progress' or request.resolver_match.url_name == 'scan_cancel' or request.resolver_match.url_name == 'scan_export' or request.resolver_match.url_name == 'scan_delete' or request.resolver_match.url_name == 'probe_history' or request.resolver_match.url_name == 'discovery_rules' or request.resolver_match.url_name == 'live_topology' %}color:#4fd1c5;font-weight:600;{% endif %}">
                         <span><i class="bi bi-radar me-1"></i>网络探测</span>
                     </a>
+                    <a href="{% url 'ipam:switch_list' %}" class="submenu-item {% if request.resolver_match.url_name == 'switch_list' or request.resolver_match.url_name == 'switch_create' or request.resolver_match.url_name == 'switch_edit' or request.resolver_match.url_name == 'switch_delete' or request.resolver_match.url_name == 'switch_test' %}current{% endif %}"
+                       style="{% if request.resolver_match.url_name == 'switch_list' or request.resolver_match.url_name == 'switch_create' or request.resolver_match.url_name == 'switch_edit' or request.resolver_match.url_name == 'switch_delete' or request.resolver_match.url_name == 'switch_test' %}color:#4fd1c5;font-weight:600;{% endif %}">
+                        <span><i class="bi bi-hdd-network me-1"></i>交换机设备管理</span>
+                    </a>
                 </div>
             </div>
 

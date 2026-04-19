@@ -35,7 +35,7 @@ class DHCPPoolForm(forms.ModelForm):
         }
     
     def clean(self):
-        """验证地址范围是否在子网内，且起始<=结束"""
+        """验证地址范围是否在子网内，且起始<=结束，且不包含网络/广播地址"""
         cleaned_data = super().clean()
         subnet = cleaned_data.get('subnet')
         start_addr = cleaned_data.get('start_address')
@@ -54,6 +54,15 @@ class DHCPPoolForm(forms.ModelForm):
             import ipaddress
             if int(ipaddress.ip_address(start_addr)) > int(ipaddress.ip_address(end_addr)):
                 raise forms.ValidationError('起始地址不能大于结束地址')
+
+            # 排除网络地址和广播地址
+            network = ipaddress.ip_network(subnet.cidr, strict=False)
+            net_addr = str(network.network_address)
+            bc_addr = str(network.broadcast_address)
+            if start_addr == net_addr or end_addr == bc_addr:
+                raise forms.ValidationError(
+                    f'地址范围不能包含网络地址({net_addr})或广播地址({bc_addr})'
+                )
         
         return cleaned_data
 
@@ -72,7 +81,7 @@ class DHCPExclusionForm(forms.ModelForm):
         }
     
     def clean(self):
-        """验证排除范围在地址池内且起始<=结束"""
+        """验证排除范围在地址池内且起始<=结束，不与活跃租约冲突"""
         cleaned_data = super().clean()
         pool = cleaned_data.get('pool')
         start_ip = cleaned_data.get('start_ip')
@@ -91,6 +100,22 @@ class DHCPExclusionForm(forms.ModelForm):
             
             if excl_start > excl_end:
                 raise forms.ValidationError('起始IP不能大于结束IP')
+
+            # 检查排除范围内是否有活跃租约（编辑时排除自身）
+            from .models import DHCPLease
+            conflict_qs = DHCPLease.objects.filter(
+                pool=pool,
+                status='active',
+                ip_address__gte=start_ip,
+                ip_address__lte=end_ip,
+            )
+            if self.instance.pk:  # 编辑模式排除自身
+                conflict_qs = conflict_qs.exclude(pk=self.instance.pk)
+            conflicts = list(conflict_qs.values_list('ip_address', flat=True))
+            if conflicts:
+                raise forms.ValidationError(
+                    f'排除范围内存在 {len(conflicts)} 个活跃租约 (如 {", ".join(conflicts[:5])})，请先释放这些租约'
+                )
         
         return cleaned_data
 

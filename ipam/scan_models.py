@@ -1,11 +1,58 @@
 """
 IPAM 探测功能模型
-支持 Ping 探测、端口扫描、ARP 扫描
+支持 Ping 探测、端口扫描、交换机 ARP 获取
 """
 
 from django.db import models
 from accounts.models import User
 import json
+
+
+class SwitchDevice(models.Model):
+    """交换机设备 - 存储SSH连接信息，用于通过show arp获取活跃IP-MAC"""
+
+    VENDOR_CHOICES = (
+        ('cisco', 'Cisco'),
+        ('huawei', 'Huawei'),
+        ('h3c', 'H3C'),
+        ('arista', 'Arista'),
+        ('juniper', 'Juniper'),
+    )
+
+    name = models.CharField('设备名称', max_length=200)
+    vendor = models.CharField('厂商', max_length=20, choices=VENDOR_CHOICES, default='cisco')
+    ip_address = models.GenericIPAddressField('管理IP')
+    port = models.IntegerField('SSH端口', default=22)
+    username = models.CharField('用户名', max_length=100)
+    password = models.CharField('密码/密钥', max_length=200,
+                                help_text='支持密码或密钥路径')
+    enable_password = models.CharField('Enable特权密码', max_length=200, blank=True, default='',
+                                       help_text='Cisco/Huawei需要enable权限才能执行show命令')
+
+    # 关联子网（可选，用于自动匹配）
+    subnet = models.ForeignKey('Subnet', on_delete=models.SET_NULL, null=True, blank=True,
+                               related_name='managed_switches', verbose_name='管理子网')
+
+    is_active = models.BooleanField('启用', default=True)
+    last_success_at = models.DateTimeField('上次成功连接', null=True, blank=True)
+    last_error = models.TextField('上次错误信息', blank=True, default='')
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+    updated_at = models.DateTimeField('更新时间', auto_now=True)
+
+    class Meta:
+        verbose_name = '交换机设备'
+        verbose_name_plural = '交换机设备'
+        ordering = ['name']
+
+    def __str__(self):
+        return f"[{self.get_vendor_display()}] {self.name} ({self.ip_address})"
+
+    @property
+    def masked_password(self):
+        """返回脱敏密码用于显示"""
+        if not self.password or len(self.password) <= 4:
+            return '****'
+        return self.password[:2] + '*' * (len(self.password) - 4) + self.password[-2:]
 
 
 class ScanTask(models.Model):
@@ -15,7 +62,7 @@ class ScanTask(models.Model):
         ('ping', 'Ping 探测'),
         ('port', '端口扫描'),
         ('arp', 'ARP 扫描'),
-        ('full', '综合扫描'),
+        ('switch_arp', '交换机ARP获取'),
     )
     
     STATUS_CHOICES = (
@@ -52,6 +99,12 @@ class ScanTask(models.Model):
     
     # 其他配置
     concurrent = models.IntegerField('并发数', default=50, help_text='同时扫描的主机数')
+    
+    # 交换机配置（switch_arp 类型时使用）
+    switch_device = models.ForeignKey(SwitchDevice, on_delete=models.SET_NULL, null=True, blank=True,
+                                      related_name='scan_tasks', verbose_name='目标交换机')
+    switch_command = models.CharField('ARP命令', max_length=200, blank=True, default='show arp',
+                                     help_text='获取ARP表命令，默认 show arp')
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
                                    related_name='scan_tasks', verbose_name='创建人')
     

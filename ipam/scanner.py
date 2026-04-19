@@ -1,6 +1,6 @@
 """
 IPAM 探测核心引擎
-支持 Ping 探测、端口扫描、ARP 扫描
+支持 Ping 探测、端口扫描、ARP 扫描、交换机SSH获取ARP
 使用 Python 标准库和第三方库实现
 """
 
@@ -11,8 +11,11 @@ import time
 import concurrent.futures
 import re
 import json
+import logging
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -508,3 +511,257 @@ class NetworkScanner:
                         host.vendor = self.arp_scanner.get_mac_vendor(host.mac_address)
         
         return results
+
+
+class SwitchARPScanner:
+    """交换机 ARP 获取器 - 通过SSH登录网络设备执行show arp获取活跃IP-MAC映射"""
+
+    VENDOR_COMMANDS = {
+        'cisco': {
+            'commands': [
+                ('terminal length 0', None),
+                ('show arp', 'arp'),
+            ],
+            'enable_needed': True,
+            'prompt_pattern': r'[>#]\s*$',
+            'parse_func': '_parse_cisco_arp',
+        },
+        'huawei': {
+            'commands': [
+                ('screen-length 0 temporary', None),
+                ('display arp all', 'arp'),
+            ],
+            'enable_needed': False,
+            'prompt_pattern': r'[>]\s*$',
+            'parse_func': '_parse_huawei_arp',
+        },
+        'h3c': {
+            'commands': [
+                ('screen-length disable', None),
+                ('display arp all', 'arp'),
+            ],
+            'enable_needed': False,
+            'prompt_pattern': r'[>]\s*$',
+            'parse_func': '_parse_huawei_arp',
+        },
+        'arista': {
+            'commands': [
+                ('terminal length 0', None),
+                ('show ip arp', 'arp'),
+            ],
+            'enable_needed': False,
+            'prompt_pattern': r'[#>]\s*$',
+            'parse_func': '_parse_cisco_arp',
+        },
+        'juniper': {
+            'commands': [
+                ('set cli screen-length 0', None),
+                ('show arp no-resolve', 'arp'),
+            ],
+            'enable_needed': False,
+            'prompt_pattern': r'[>#]\s*$',
+            'parse_func': '_parse_juniper_arp',
+        },
+    }
+
+    def __init__(self, timeout: int = 30):
+        self.timeout = timeout
+
+    def fetch_arp(self, switch_device) -> List[ScanHostResult]:
+        """从交换机获取ARP表，返回 ScanHostResult 列表"""
+        vendor_config = self.VENDOR_COMMANDS.get(switch_device.vendor)
+        if not vendor_config:
+            raise ValueError(f'不支持的设备厂商: {switch_device.vendor}')
+
+        try:
+            import paramiko
+        except ImportError:
+            raise ImportError('缺少 paramiko 库，请执行: pip install paramiko')
+
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+        try:
+            client.connect(
+                hostname=str(switch_device.ip_address),
+                port=switch_device.port or 22,
+                username=switch_device.username,
+                password=switch_device.password,
+                timeout=self.timeout,
+                allow_agent=False,
+                look_for_keys=False,
+            )
+            shell = client.invoke_shell()
+            time.sleep(1)
+
+            if shell.recv_ready():
+                shell.recv(65535)
+            time.sleep(0.5)
+
+            if vendor_config['enable_needed'] and switch_device.enable_password:
+                shell.send('enable\n')
+                time.sleep(1)
+                if shell.recv_ready():
+                    shell.recv(65535)
+                shell.send(switch_device.enable_password + '\n')
+                time.sleep(1)
+                if shell.recv_ready():
+                    shell.recv(65535)
+
+            output_parts = {}
+            for cmd, key in vendor_config['commands']:
+                shell.send(cmd + '\n')
+                
+                output = ''
+                elapsed = 0
+                while elapsed < self.timeout:
+                    time.sleep(0.5)
+                    elapsed += 0.5
+                    while shell.recv_ready():
+                        chunk = shell.recv(65535).decode('utf-8', errors='ignore')
+                        output += chunk
+                    
+                    prompt_match = re.search(vendor_config['prompt_pattern'],
+                                             output.split('\n')[-1] if output else '')
+                    if prompt_match and len(output.strip().split('\n')) > 2:
+                        break
+                
+                if key:
+                    output_parts[key] = output
+            
+            client.close()
+
+            parse_method_name = vendor_config['parse_func']
+            parse_func = getattr(self, parse_method_name)
+            entries = parse_func(output_parts.get('arp', ''))
+
+            results = []
+            for entry in entries:
+                result = ScanHostResult(
+                    ip=entry.get('ip', ''),
+                    is_online=True,
+                    mac_address=entry.get('mac', '').upper(),
+                    vendor=self._get_mac_vendor(entry.get('mac', '')),
+                    reverse_dns='',
+                )
+                result.ping = PingResult(ip=result.ip, success=True)
+                results.append(result)
+
+            logger.info(f"[交换机ARP] {getattr(switch_device, 'name', '?')} 成功获取 {len(results)} 条ARP记录")
+            return results
+
+        except Exception as e:
+            logger.error(f"[交换机ARP] 连接失败: {e}")
+            raise
+
+    @staticmethod
+    def _parse_cisco_arp(raw_output: str) -> List[Dict]:
+        entries = []
+        for line in raw_output.splitlines():
+            line = line.strip()
+            match = re.match(
+                r'(?:Internet\s+)?([\d\.]+)\s+\d+?\s+'
+                r'([0-9a-fA-F]{4}\.[0-9a-fA-F]{4}\.[0-9a-fA-F]{4}|'
+                r'[0-9a-fA-F]{2}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2})\s*',
+                line
+            )
+            if match:
+                ip = match.group(1)
+                mac = match.group(2).replace('.', ':').upper()
+                if mac not in ('00:00:00:00:00:00', 'FF:FF:FF:FF:FF:FF'):
+                    entries.append({'ip': ip, 'mac': mac})
+        return entries
+
+    @staticmethod
+    def _parse_huawei_arp(raw_output: str) -> List[Dict]:
+        entries = []
+        in_table = False
+        for line in raw_output.splitlines():
+            line = line.strip()
+            if 'IP Address' in line or 'MAC Address' in line or 'IP地址' in line:
+                in_table = True
+                continue
+            if re.match(r'^[\s\-]+$', line):
+                continue
+            if not in_table:
+                continue
+            match = re.match(
+                r'([\d\.]+)\s+'
+                r'([0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}|'
+                r'[0-9a-fA-F]{2}-[0-9a-fA-F]{2}-[0-9a-fA-F]{2}-[0-9a-fA-F]{2}-[0-9a-fA-F]{2}-[0-9a-fA-F]{2})\s*',
+                line
+            )
+            if match:
+                ip = match.group(1)
+                mac = match.group(2).replace('-', ':').upper()
+                if mac != '00:00:00:00:00:00':
+                    entries.append({'ip': ip, 'mac': mac})
+        return entries
+
+    @staticmethod
+    def _parse_juniper_arp(raw_output: str) -> List[Dict]:
+        entries = []
+        for line in raw_output.splitlines():
+            line = line.strip()
+            match = re.match(
+                r'([\d\.]+)\s+'
+                r'([0-9a-fA-F]{2}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2})\s*',
+                line
+            )
+            if match:
+                ip = match.group(1)
+                mac = match.group(2).upper()
+                if mac != '00:00:00:00:00:00':
+                    entries.append({'ip': ip, 'mac': mac})
+        return entries
+
+    @staticmethod
+    def _get_mac_vendor(mac_address: str) -> str:
+        if not mac_address or len(mac_address) < 8:
+            return ''
+        prefix = mac_address[:8].upper()
+        vendors = {
+            '00:50:56': 'VMware', '00:0C:29': 'VMware', '00:05:69': 'VMware',
+            '52:54:00': 'QEMU/KVM', '08:00:27': 'VirtualBox',
+            'DC:A9:04': 'Docker', '02:42:AC': 'Docker',
+            '00:15:5D': 'Hyper-V', '00:03:FF': 'Microsoft',
+            '00:1A:11': 'Cisco', '00:23:AC': 'Cisco', '00:25:B3': 'Cisco',
+            '00:26:CB': 'Cisco', '84:2B:2B': 'Cisco', 'F0:BF:97': 'Cisco',
+            '34:E7:D4': 'Huawei', '00:E0:FC': 'Huawei',
+            'CC:B2:55': 'H3C', '00:09:0F': 'H3C',
+            '00:1E:E5': 'Juniper', '00:19:06': 'Juniper',
+            '00:04:96': 'Dell', '84:8F:69': 'Dell',
+            '18:03:73': 'HP', '00:26:BB': 'HP', '3C:D9:2E': 'HP',
+            '88:99:BB': 'Lenovo', 'E0:94:67': 'Lenovo',
+            '00:14:22': 'IBM/Lenovo', '00:1C:B3': 'Intel', '00:21:CC': 'Intel',
+            '00:24:D7': 'Arista', '90:B1:1C': 'Arista', '60:9F:C4': 'Arista',
+        }
+        for oui, vendor in vendors.items():
+            if mac_address.upper().startswith(oui):
+                return vendor
+        return ''
+
+    @staticmethod
+    def test_connection(switch_device) -> Tuple[bool, str]:
+        """测试交换机 SSH 连接"""
+        try:
+            import paramiko
+        except ImportError:
+            return False, '缺少paramiko库'
+
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        try:
+            client.connect(
+                hostname=str(switch_device.ip_address),
+                port=switch_device.port or 22,
+                username=switch_device.username,
+                password=switch_device.password,
+                timeout=10,
+                allow_agent=False,
+                look_for_keys=False,
+            )
+            client.close()
+            return True, '连接成功'
+        except Exception as e:
+            return False, str(e)

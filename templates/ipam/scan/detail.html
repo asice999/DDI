@@ -36,7 +36,7 @@
                             <table class="table table-sm table-borderless mb-0">
                                 <tbody>
                                     <tr><td width="120" class="text-muted">任务类型:</td>
-                                        <td><span class="badge rounded-pill bg-{% if task.task_type == 'ping' %}primary{% elif task.task_type == 'port' %}success{% else %}warning{% endif %}">
+                                        <td><span class="badge rounded-pill bg-{% if task.task_type == 'ping' %}primary{% elif task.task_type == 'port' %}success{% elif task.task_type == 'switch_arp' %}warning{% else %}secondary{% endif %}">
                                             {{ task.get_task_type_display }}
                                         </span></td></tr>
                                     <tr><td class="text-muted">目标:</td>

@@ -425,7 +425,7 @@ class DHCPServer:
             logger.error(f"发送DHCP响应失败: {e}")
 
     def _record_lease(self, ip, mac, pool):
-        """记录租约到数据库"""
+        """记录租约到数据库 — 同一MAC仅保留一条active租约"""
         try:
             from .models import DHCPLease
             from django.utils import timezone
@@ -433,10 +433,21 @@ class DHCPServer:
 
             now = timezone.now()
             lease_time_sec = pool.lease_time
+            mac_upper = mac.upper()
+
+            # 先回收该MAC的所有旧活跃租约，避免同一MAC占用多个IP
+            old_leases = DHCPLease.objects.filter(
+                mac_address=mac_upper,
+                status='active'
+            ).exclude(ip_address=ip)
+            old_count = old_leases.count()
+            if old_count > 0:
+                old_leases.update(status='released')
+                logger.info(f"[DHCP 租约回收] MAC={mac_upper} 回收了 {old_count} 条旧租约")
 
             DHCPLease.objects.update_or_create(
                 ip_address=ip,
-                mac_address=mac.upper(),
+                mac_address=mac_upper,
                 defaults={
                     'hostname': '',
                     'device_identifier': '',
@@ -521,6 +532,10 @@ class DHCPServer:
 
         if self.thread and self.thread.is_alive():
             self.thread.join(timeout=3)
+
+        # 停止时清空内存中的分配记录
+        with self._lock:
+            self._allocated_ips.clear()
 
         info = f"已停止，累计服务 {self._total_served} 次"
         self._start_time = None

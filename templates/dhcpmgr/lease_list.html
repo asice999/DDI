@@ -12,6 +12,13 @@
         <a href="{% url 'dhcpmgr:check_expired' %}" class="btn btn-warning btn-sm">
             <i class="bi bi-arrow-repeat"></i> 检查过期
         </a>
+        <form method="post" action="{% url 'dhcpmgr:release_all' %}" class="d-inline"
+              onsubmit="return confirm('确定释放所有活跃租约？此操作不可撤销！')">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-danger btn-sm">
+                <i class="bi bi-x-circle"></i> 释放全部
+            </button>
+        </form>
     </div>
 </div>
 
