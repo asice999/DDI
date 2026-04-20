@@ -1,0 +1,11 @@
+version: '3.8'
+services:
+  ddi:
+    build: https://github.com/你的用户名/DDI.git
+    ports:
+      - "8000:8000"
+    volumes:
+      - ddi_data:/app/data
+    restart: unless-stopped
+volumes:
+  ddi_data:
